@@ -52,13 +52,14 @@ export function createEmailTools(
     {
       name: "search_emails",
       description:
-        "Search for emails in mailbox.org account with various filters. By default, searches are limited to the most recent 6 months unless an explicit date range is provided.",
+        "Search or list emails in mailbox.org. For literal searches such as a sender, subject, domain, invoice number, order number, or exact phrase, use query. For analytical or semantic questions such as how many customers accepted an offer, rejected an offer, are waiting for a reply, or expressed a particular intent, DO NOT put the user's natural-language question into query. Instead, first list messages for the requested date range with query omitted, then use get_email to inspect the full content of relevant messages. If more than the maximum number of messages exists in the requested period, continue with offset pagination until the required period has been covered. When no explicit date range is provided, the service searches only the most recent 6 months.",
       inputSchema: {
         type: "object",
         properties: {
           query: {
             type: "string",
-            description: "Search query to match against email subject and body",
+            description:
+              "Literal IMAP search text. Use only for text that is expected to actually occur in the email, such as a sender, subject phrase, domain, order number, invoice number, or exact wording. Omit this field for semantic/business analysis and retrieve messages by date range instead.",
           },
           folder: {
             type: "string",
@@ -96,7 +97,8 @@ export function createEmailTools(
     },
     {
       name: "get_email",
-      description: "Get full content of a specific email by UID",
+      description:
+        "Get the full content of a specific email by UID. Use this after search_emails when the task requires understanding meaning, intent, acceptance, rejection, decisions, requests, or other information that cannot be determined reliably from email metadata alone.",
       inputSchema: {
         type: "object",
         properties: {
