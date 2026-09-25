@@ -11,4 +11,10 @@ COPY . .
 
 RUN bun run build
 
+COPY --from=flyio/flyctl /flyctl /usr/bin
+
+ENTRYPOINT ["/usr/bin/flyctl", "mcp", "wrap", "--"]
+
+EXPOSE 8080
+
 CMD ["node", "dist/main.js"]
