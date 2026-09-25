@@ -199,6 +199,9 @@ export const getEmailThreadSchema = v.object({
   folder: v.optional(folderNameSchema, "INBOX"),
 });
 
+export const getFolderStatusSchema = v.object({
+  folder: v.optional(folderNameSchema, "INBOX"),
+});
 export const sendEmailSchema = v.pipe(
   v.object({
     to: v.pipe(
@@ -359,6 +362,9 @@ export const getFreeBusySchema = v.pipe(
 export type SearchEmailsInput = v.InferOutput<typeof searchEmailsSchema>;
 export type GetEmailInput = v.InferOutput<typeof getEmailSchema>;
 export type GetEmailThreadInput = v.InferOutput<typeof getEmailThreadSchema>;
+export type GetFolderStatusInput = v.InferOutput<
+  typeof getFolderStatusSchema
+>;
 export type SendEmailInput = v.InferOutput<typeof sendEmailSchema>;
 export type CreateDraftInput = v.InferOutput<typeof createDraftSchema>;
 export type MoveEmailInput = v.InferOutput<typeof moveEmailSchema>;
