@@ -83,33 +83,52 @@ export class EmailService {
   }
 
   async searchEmails(options: EmailSearchOptions): Promise<EmailMessage[]> {
-    const cacheKey = `email_search:${JSON.stringify(options)}`;
+  const effectiveOptions: EmailSearchOptions = { ...options };
 
-    return withCacheFallback({
-      cacheKey,
-      cache: this.cache,
-      fetch: async () => {
-        const folder = options.folder || "INBOX";
-        let wrapper: ImapConnectionWrapper | null = null;
-
-        try {
-          wrapper = await this.pool.acquireForFolder(folder);
-          const messages = await this.performEmailSearch(wrapper, options);
-          return messages;
-        } finally {
-          if (wrapper) {
-            await this.pool.releaseFromFolder(wrapper);
-          }
-        }
-      },
-      defaultValue: [],
-      logger: this.logger,
-      operation: "searchEmails",
-      service: "EmailService",
-      ttl: 300000, // 5 minutes TTL
-      logContext: { folder: options.folder, query: options.query },
-    });
+  // Default to the last 6 months to reduce IMAP work and resource usage.
+  // If the caller explicitly provides either "since" or "before",
+  // respect that historical date range instead.
+  if (!effectiveOptions.since && !effectiveOptions.before) {
+    const sixMonthsAgo = new Date();
+    sixMonthsAgo.setMonth(sixMonthsAgo.getMonth() - 6);
+    effectiveOptions.since = sixMonthsAgo;
   }
+
+  const cacheKey = `email_search:${JSON.stringify(effectiveOptions)}`;
+
+  return withCacheFallback({
+    cacheKey,
+    cache: this.cache,
+    fetch: async () => {
+      const folder = effectiveOptions.folder || "INBOX";
+      let wrapper: ImapConnectionWrapper | null = null;
+
+      try {
+        wrapper = await this.pool.acquireForFolder(folder);
+        const messages = await this.performEmailSearch(
+          wrapper,
+          effectiveOptions,
+        );
+        return messages;
+      } finally {
+        if (wrapper) {
+          await this.pool.releaseFromFolder(wrapper);
+        }
+      }
+    },
+    defaultValue: [],
+    logger: this.logger,
+    operation: "searchEmails",
+    service: "EmailService",
+    ttl: 300000,
+    logContext: {
+      folder: effectiveOptions.folder,
+      query: effectiveOptions.query,
+      since: effectiveOptions.since?.toISOString(),
+      before: effectiveOptions.before?.toISOString(),
+    },
+  });
+}
 
   async getEmail(uid: number, folder = "INBOX"): Promise<EmailMessage | null> {
     const cacheKey = `email:${folder}:${uid}`;
@@ -206,13 +225,18 @@ export class EmailService {
   }
 
   private applyPagination(
-    searchResult: number[],
-    options: EmailSearchOptions,
-  ): number[] {
-    const offset = options.offset || 0;
-    const end = options.limit ? offset + options.limit : undefined;
-    return searchResult.slice(offset, end);
-  }
+  searchResult: number[],
+  options: EmailSearchOptions,
+): number[] {
+  const offset = options.offset || 0;
+  const end = options.limit ? offset + options.limit : undefined;
+
+  // IMAP search results are returned in mailbox order (oldest first).
+  // Reverse a copy so pagination always starts with the newest messages.
+  const newestFirst = [...searchResult].sort((a, b) => b - a);
+
+  return newestFirst.slice(offset, end);
+}
 
   private async fetchMessageHeaders(
     wrapper: ImapConnectionWrapper,
@@ -683,7 +707,29 @@ export class EmailService {
       }
     }
   }
+  async getFolderStatus(
+    folder = "INBOX",
+  ): Promise<{ messages: number; unseen: number }> {
+    let wrapper: ImapConnectionWrapper | null = null;
 
+    try {
+      wrapper = await this.pool.acquire();
+
+      const status = await wrapper.connection.status(folder, {
+        messages: true,
+        unseen: true,
+      });
+
+      return {
+        messages: status.messages ?? 0,
+        unseen: status.unseen ?? 0,
+      };
+    } finally {
+      if (wrapper) {
+        await this.pool.release(wrapper);
+      }
+    }
+  }
   async moveEmail(
     uid: number,
     fromFolder: string,
