@@ -15,6 +15,7 @@ import {
   deleteEmailSchema,
   getEmailSchema,
   getEmailThreadSchema,
+  getFolderStatusSchema,
   markEmailSchema,
   moveEmailSchema,
   searchEmailsSchema,
@@ -33,6 +34,7 @@ export const EMAIL_TOOLS = [
   "mark_email",
   "delete_email",
   "get_folders",
+  "get_folder_status",
   "create_directory",
 ] as const;
 
@@ -50,7 +52,7 @@ export function createEmailTools(
     {
       name: "search_emails",
       description:
-        "Search for emails in mailbox.org account with various filters",
+        "Search for emails in mailbox.org account with various filters. By default, searches are limited to the most recent 6 months unless an explicit date range is provided.",
       inputSchema: {
         type: "object",
         properties: {
@@ -67,13 +69,13 @@ export function createEmailTools(
             type: "string",
             format: "date-time",
             description:
-              "Only return emails newer than this date (ISO 8601 format)",
+              "Only return emails newer than this date (ISO 8601 format). Supplying an explicit date range overrides the default 6-month search window.",
           },
           before: {
             type: "string",
             format: "date-time",
             description:
-              "Only return emails older than this date (ISO 8601 format)",
+              "Only return emails older than this date (ISO 8601 format). Supplying an explicit date range overrides the default 6-month search window.",
           },
           limit: {
             type: "number",
@@ -345,6 +347,22 @@ export function createEmailTools(
       },
     },
     {
+      name: "get_folder_status",
+      description:
+        "Get the exact total message count and unread message count for an email folder without fetching email contents. Use this instead of search_emails when the user asks how many messages are in a folder.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          folder: {
+            type: "string",
+            description: "Email folder to check (default: INBOX)",
+            default: "INBOX",
+          },
+        },
+        additionalProperties: false,
+      },
+    },
+    {
       name: "create_directory",
       description: "Create a new email folder/directory",
       inputSchema: {
@@ -419,13 +437,13 @@ Folder: ${email.folder}
       case "get_email": {
         const validatedArgs = validateInput(getEmailSchema, args);
         let email: EmailMessage | null;
+
         try {
           email = await emailService.getEmail(
             validatedArgs.uid,
             validatedArgs.folder,
           );
         } catch (error) {
-          // Handle connection errors gracefully
           if (
             error instanceof Error &&
             (error.message.includes("ECONNRESET") ||
@@ -441,6 +459,7 @@ Folder: ${email.folder}
               isError: true,
             };
           }
+
           throw error;
         }
 
@@ -684,6 +703,25 @@ ${folder.specialUse ? `Special Use: ${folder.specialUse}\n` : ""}`,
         };
       }
 
+      case "get_folder_status": {
+        const validatedArgs = validateInput(getFolderStatusSchema, args);
+
+        const status = await emailService.getFolderStatus(
+          validatedArgs.folder ?? "INBOX",
+        );
+
+        return {
+          content: [
+            {
+              type: "text",
+              text: `Folder: ${validatedArgs.folder ?? "INBOX"}
+Total messages: ${status.messages}
+Unread messages: ${status.unseen}`,
+            },
+          ],
+        };
+      }
+
       case "create_directory": {
         const validatedArgs = validateInput(createDirectorySchema, args);
         const result = await emailService.createDirectory(
@@ -718,7 +756,6 @@ ${folder.specialUse ? `Special Use: ${folder.specialUse}\n` : ""}`,
       details: { args },
     };
 
-    // Handle validation errors specifically
     if (
       error instanceof Error &&
       error.message.startsWith("Validation failed:")
@@ -741,7 +778,6 @@ ${folder.specialUse ? `Special Use: ${folder.specialUse}\n` : ""}`,
       };
     }
 
-    // Convert to structured error if not already
     const mcpError =
       error instanceof Error
         ? ErrorUtils.toMCPError(error, context)
