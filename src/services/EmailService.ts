@@ -90,7 +90,12 @@ export class EmailService {
   // respect that historical date range instead.
   if (!effectiveOptions.since && !effectiveOptions.before) {
     const sixMonthsAgo = new Date();
-    sixMonthsAgo.setMonth(sixMonthsAgo.getMonth() - 6);
+    const day = sixMonthsAgo.getUTCDate();
+    sixMonthsAgo.setUTCDate(1);
+    sixMonthsAgo.setUTCMonth(sixMonthsAgo.getUTCMonth() - 6);
+    const lastDay = new Date(Date.UTC(sixMonthsAgo.getUTCFullYear(), sixMonthsAgo.getUTCMonth() + 1, 0)).getUTCDate();
+    sixMonthsAgo.setUTCDate(Math.min(day, lastDay));
+    sixMonthsAgo.setUTCHours(0, 0, 0, 0);
     effectiveOptions.since = sixMonthsAgo;
   }
 
@@ -220,7 +225,7 @@ export class EmailService {
     options: EmailSearchOptions,
   ): Promise<number[] | null> {
     const searchCriteria = this.buildSearchCriteria(options);
-    const result = await wrapper.connection.search(searchCriteria);
+    const result = await wrapper.connection.search(searchCriteria, { uid: true });
     return Array.isArray(result) ? result : null;
   }
 
@@ -250,7 +255,7 @@ export class EmailService {
         envelope: true,
         uid: true,
         flags: true,
-      });
+      }, { uid: true });
 
       try {
         for await (const message of iterator) {

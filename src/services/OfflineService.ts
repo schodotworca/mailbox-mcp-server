@@ -198,7 +198,7 @@ export class OfflineService {
 
     if (options.before) {
       const before = options.before;
-      filtered = filtered.filter(email => email.date <= before);
+      filtered = filtered.filter(email => email.date < before);
     }
 
     // Apply pagination
