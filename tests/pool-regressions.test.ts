@@ -35,3 +35,57 @@ it('bounds logout when IMAP is stuck', async () => {
   expect(connection.close).toHaveBeenCalledTimes(1);
   await pool.destroy();
 });
+it('does not exceed the pool limit during simultaneous connection creation', async () => {
+  vi.useFakeTimers(); const pool = new Pool(config);
+  try {
+    const first = pool.acquire();
+    const second = expect(pool.acquire()).rejects.toThrow('timeout');
+    await first; await vi.advanceTimersByTimeAsync(101); await second;
+    expect(pool.getMetrics().totalConnections).toBe(1);
+  } finally {await pool.destroy();}
+});
+it('never leases the same idle connection to two callers', async () => {
+  vi.useFakeTimers(); const pool = new Pool(config);
+  try {
+    const original = await pool.acquire(); await pool.release(original);
+    const first = pool.acquire();
+    const second = expect(pool.acquire()).rejects.toThrow('timeout');
+    await first; await vi.advanceTimersByTimeAsync(101); await second;
+    expect(pool.getMetrics().activeConnections).toBe(1);
+  } finally {await pool.destroy();}
+});
+it('makes health-check-created minimum connections available to callers', async () => {
+  vi.useFakeTimers(); const pool = new Pool({...config,minConnections:1,healthCheckIntervalMs:10});
+  try {
+    await vi.advanceTimersByTimeAsync(11);
+    expect(pool.getMetrics().idleConnections).toBe(1);
+    expect(pool.getMetrics().activeConnections).toBe(0);
+    const wrapper = await pool.acquire(); expect(wrapper).toBeDefined();
+  } finally {await pool.destroy();}
+});
+it('hands a health-checked idle slot to a caller queued during validation', async () => {
+  const pool = new Pool(config);
+  try {
+    const wrapper = await pool.acquire(); await pool.release(wrapper);
+    let finish!: (value:boolean)=>void;
+    vi.spyOn(pool,'validateConnection').mockImplementationOnce(() => new Promise(resolve => {finish=resolve;}));
+    const health = (pool as any).performHealthCheck();
+    const acquire = pool.acquire();
+    finish(true); await health;
+    expect((await acquire).id).toBe(wrapper.id);
+  } finally {await pool.destroy();}
+});
+it('releases a connection whose queued caller timed out during validation', async () => {
+  vi.useFakeTimers(); const pool = new Pool(config);
+  try {
+    const wrapper = await pool.acquire();
+    const waiting = expect(pool.acquire()).rejects.toThrow('timeout');
+    let finish!: (value:boolean)=>void;
+    vi.spyOn(pool,'validateConnection').mockImplementationOnce(() => new Promise(resolve => {finish=resolve;}));
+    const release = pool.release(wrapper);
+    await vi.advanceTimersByTimeAsync(101); await waiting;
+    finish(true); await release;
+    expect(pool.getMetrics().activeConnections).toBe(0);
+    expect(pool.getMetrics().idleConnections).toBe(1);
+  } finally {await pool.destroy();}
+});

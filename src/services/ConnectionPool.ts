@@ -55,6 +55,9 @@ export abstract class ConnectionPool<T> {
   protected logger = createLogger("ConnectionPool");
   private healthCheckInterval?: NodeJS.Timeout;
   private isShuttingDown = false;
+  private pendingCreations = 0;
+  private healthCheckRunning = false;
+  private activatingConnections = new Set<string>();
   private connectionErrors: Array<{
     timestamp: Date;
     error: string;
@@ -104,13 +107,13 @@ export abstract class ConnectionPool<T> {
       if (idleConnection) {
         // Activate the connection - if this fails, the error will be caught below
         // and waitingRequests will be decremented in the catch block
-        const activated = await this.activateConnection(idleConnection);
+        const activated = await this.reserveAndActivate(idleConnection);
         this.metrics.waitingRequests--;
         return activated;
       }
 
       // Try to create a new connection if under max limit
-      if (this.connections.size < this.config.maxConnections) {
+      if (this.connections.size + this.pendingCreations < this.config.maxConnections) {
         const wrapper = await this.createNewConnection();
         this.metrics.waitingRequests--;
         return wrapper;
@@ -173,7 +176,8 @@ export abstract class ConnectionPool<T> {
         // Try to create a new connection for the waiting request
         try {
           const newWrapper = await this.createNewConnection();
-          request.resolve(newWrapper);
+          if (request.settled) await this.release(newWrapper);
+          else request.resolve(newWrapper);
         } catch (error) {
           request.reject(
             error instanceof Error ? error : new Error(String(error)),
@@ -184,8 +188,9 @@ export abstract class ConnectionPool<T> {
 
       // Connection is healthy, try to activate it for the waiting request
       try {
-        const activatedWrapper = await this.activateConnection(wrapper);
-        request.resolve(activatedWrapper);
+        const activatedWrapper = await this.reserveAndActivate(wrapper);
+        if (request.settled) await this.release(activatedWrapper);
+        else request.resolve(activatedWrapper);
       } catch (error) {
         request.reject(
           error instanceof Error ? error : new Error(String(error)),
@@ -228,7 +233,7 @@ export abstract class ConnectionPool<T> {
 
   private findIdleConnection(): ConnectionWrapper<T> | null {
     for (const wrapper of this.connections.values()) {
-      if (!wrapper.inUse && wrapper.isHealthy) {
+      if (!wrapper.inUse && wrapper.isHealthy && !this.activatingConnections.has(wrapper.id)) {
         return wrapper;
       }
     }
@@ -236,7 +241,22 @@ export abstract class ConnectionPool<T> {
   }
 
   private async createNewConnection(): Promise<ConnectionWrapper<T>> {
-    return this.createConnectionWithRetries();
+    this.pendingCreations++;
+    try {
+      return await this.createConnectionWithRetries();
+    } finally {
+      this.pendingCreations--;
+    }
+  }
+
+  private async reserveAndActivate(wrapper: ConnectionWrapper<T>): Promise<ConnectionWrapper<T>> {
+    // Reserve synchronously before validation yields to another caller.
+    this.activatingConnections.add(wrapper.id);
+    try {
+      return await this.activateConnection(wrapper);
+    } finally {
+      this.activatingConnections.delete(wrapper.id);
+    }
   }
 
   private async createConnectionWithRetries(): Promise<ConnectionWrapper<T>> {
@@ -403,10 +423,16 @@ export abstract class ConnectionPool<T> {
   }
 
   private async performHealthCheck(): Promise<void> {
-    const connectionsToDestroy = await this.identifyConnectionsToDestroy();
-    await this.destroyUnhealthyConnections(connectionsToDestroy);
-    await this.ensureMinimumConnections();
-    this.updateMetrics();
+    if (this.healthCheckRunning || this.isShuttingDown) return;
+    this.healthCheckRunning = true;
+    try {
+      const connectionsToDestroy = await this.identifyConnectionsToDestroy();
+      await this.destroyUnhealthyConnections(connectionsToDestroy);
+      await this.ensureMinimumConnections();
+      this.updateMetrics();
+    } finally {
+      this.healthCheckRunning = false;
+    }
   }
 
   private async identifyConnectionsToDestroy(): Promise<
@@ -417,7 +443,8 @@ export abstract class ConnectionPool<T> {
     const connectionsToDestroy: ConnectionWrapper<T>[] = [];
 
     for (const wrapper of this.connections.values()) {
-      if (!wrapper.inUse) {
+      if (!wrapper.inUse && !this.activatingConnections.has(wrapper.id)) {
+        this.activatingConnections.add(wrapper.id);
         const shouldDestroy = await this.shouldDestroyConnection(
           wrapper,
           now,
@@ -425,6 +452,15 @@ export abstract class ConnectionPool<T> {
         );
         if (shouldDestroy) {
           connectionsToDestroy.push(wrapper);
+        } else {
+          this.activatingConnections.delete(wrapper.id);
+          if (this.waitingQueue.length > 0) {
+            // A caller may have queued while health validation reserved the slot.
+            wrapper.inUse = true;
+            this.metrics.activeConnections++;
+            this.metrics.idleConnections--;
+            await this.release(wrapper);
+          }
         }
       }
     }
@@ -462,17 +498,23 @@ export abstract class ConnectionPool<T> {
     connectionsToDestroy: ConnectionWrapper<T>[],
   ): Promise<void> {
     for (const wrapper of connectionsToDestroy) {
-      await this.destroyConnectionWrapper(wrapper);
+      try {
+        await this.destroyConnectionWrapper(wrapper);
+      } finally {
+        this.activatingConnections.delete(wrapper.id);
+      }
     }
   }
 
   private async ensureMinimumConnections(): Promise<void> {
     while (
-      this.connections.size < this.config.minConnections &&
+      this.connections.size + this.pendingCreations < this.config.minConnections &&
+      this.connections.size + this.pendingCreations < this.config.maxConnections &&
       !this.isShuttingDown
     ) {
       try {
-        await this.createNewConnection();
+        const wrapper = await this.createNewConnection();
+        await this.release(wrapper);
       } catch (error) {
         const errorMsg = error instanceof Error ? error.message : String(error);
         await this.logger.warning(
