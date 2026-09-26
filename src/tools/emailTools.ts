@@ -576,18 +576,65 @@ ${thread.messages
           html: validatedArgs.html,
         };
 
-        const result = await smtpService.sendEmail(composition);
+           const result = await smtpService.sendEmail(composition);
+
+        if (!result.success) {
+          return {
+            content: [
+              {
+                type: "text",
+                text: `❌ Failed to send email: ${result.message}`,
+              },
+            ],
+            isError: true,
+          };
+        }
+
+        // SMTP has already accepted the message.
+        // From this point onward we must NEVER retry the SMTP send
+        // just because saving the Sent copy fails.
+        const sentCopyResult = await emailService.saveSentCopy(composition);
+
+        if (!sentCopyResult.success) {
+          return {
+            content: [
+              {
+                type: "text",
+                text: `⚠️ Email was accepted by the SMTP server, but the copy could not be saved in the Sent folder.
+
+**Subject:** ${validatedArgs.subject}
+**To:** ${validatedArgs.to
+                  .map(
+                    (r: { name?: string; address: string }) =>
+                      `${r.name || ""} <${r.address}>`,
+                  )
+                  .join(", ")}
+**Message ID:** ${result.messageId || "Unknown"}
+
+Do not resend automatically. The recipient may already have received this email.
+
+Sent-copy error: ${sentCopyResult.message}`,
+              },
+            ],
+          };
+        }
 
         return {
           content: [
             {
               type: "text",
-              text: result.success
-                ? `✅ Email sent successfully!\n\n**Subject:** ${validatedArgs.subject}\n**To:** ${validatedArgs.to.map((r: { name?: string; address: string }) => `${r.name || ""} <${r.address}>`).join(", ")}\n**Message ID:** ${result.messageId || "Unknown"}`
-                : `❌ Failed to send email: ${result.message}`,
+              text: `✅ Email sent successfully and a copy was saved in the Sent folder.
+
+**Subject:** ${validatedArgs.subject}
+**To:** ${validatedArgs.to
+                .map(
+                  (r: { name?: string; address: string }) =>
+                    `${r.name || ""} <${r.address}>`,
+                )
+                .join(", ")}
+**Message ID:** ${result.messageId || "Unknown"}`,
             },
           ],
-          isError: !result.success,
         };
       }
 
