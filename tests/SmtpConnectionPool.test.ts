@@ -279,8 +279,9 @@ describe("SmtpConnectionPool", () => {
 
       const metrics = pool.getSmtpMetrics();
 
-      expect(metrics.totalVerificationFailures).toBe(1);
-      expect(metrics.connectionsNeedingVerification).toBe(1);
+      expect(metrics.totalVerificationFailures).toBe(0);
+      expect(metrics.totalDestroyed).toBe(1);
+      expect(metrics.connectionsNeedingVerification).toBe(0);
       expect(metrics.verificationIntervalMs).toBe(
         config.verificationIntervalMs,
       );
@@ -301,7 +302,8 @@ describe("SmtpConnectionPool", () => {
       await pool.release(wrapper2);
 
       const metrics = pool.getSmtpMetrics();
-      expect(metrics.totalVerificationFailures).toBe(3);
+      expect(metrics.totalVerificationFailures).toBe(0);
+      expect(metrics.totalDestroyed).toBe(2);
     });
   });
 

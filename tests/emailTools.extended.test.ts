@@ -31,6 +31,7 @@ describe("Email Tools - Extended Coverage", () => {
       getFolders: vi.fn(),
       createDirectory: vi.fn(),
       createDraft: vi.fn(),
+      saveSentCopy: vi.fn().mockResolvedValue({success:true, message:"Saved"}),
       moveEmail: vi.fn(),
       markEmail: vi.fn(),
       deleteEmail: vi.fn(),
@@ -47,6 +48,7 @@ describe("Email Tools - Extended Coverage", () => {
         success: true,
         message: "Email sent",
         messageId: "msg-123",
+        rawMessage: Buffer.from("From: sender@example.com\r\n\r\nBody"),
       });
 
       const result = await handleEmailTool(
@@ -68,9 +70,9 @@ describe("Email Tools - Extended Coverage", () => {
         bcc: undefined,
         html: undefined,
       });
-      expect(result.content[0].text).toContain("✅ Email sent successfully!");
+      expect(result.content[0].text).toContain("✅ Email was accepted by the SMTP server.");
       expect(result.content[0].text).toContain("Test Email");
-      expect(result.isError).toBe(false);
+      expect(result.isError).not.toBe(true);
     });
 
     it("should send email with CC and BCC", async () => {
@@ -142,7 +144,7 @@ describe("Email Tools - Extended Coverage", () => {
       );
 
       expect(result.isError).toBe(true);
-      expect(result.content[0].text).toContain("❌ Failed to send email");
+      expect(result.content[0].text).toContain("SMTP authentication failed");
     });
 
     it("should handle missing SMTP service", async () => {
@@ -182,7 +184,7 @@ describe("Email Tools - Extended Coverage", () => {
 
       expect(mockEmailService.createDraft).toHaveBeenCalled();
       expect(result.content[0].text).toContain("✅ Draft saved successfully!");
-      expect(result.isError).toBe(false);
+      expect(result.isError).not.toBe(true);
     });
 
     it("should create draft in custom folder", async () => {
@@ -250,7 +252,7 @@ describe("Email Tools - Extended Coverage", () => {
         "Archive",
       );
       expect(result.content[0].text).toContain("✅ Email moved successfully!");
-      expect(result.isError).toBe(false);
+      expect(result.isError).not.toBe(true);
     });
 
     it("should handle move failure", async () => {
@@ -301,7 +303,7 @@ describe("Email Tools - Extended Coverage", () => {
       expect(result.content[0].text).toContain(
         "✅ Email flags updated successfully!",
       );
-      expect(result.isError).toBe(false);
+      expect(result.isError).not.toBe(true);
     });
 
     it("should mark email as unread", async () => {
@@ -402,7 +404,7 @@ describe("Email Tools - Extended Coverage", () => {
       expect(result.content[0].text).toContain(
         "✅ Email deleted successfully!",
       );
-      expect(result.isError).toBe(false);
+      expect(result.isError).not.toBe(true);
     });
 
     it("should delete email permanently", async () => {

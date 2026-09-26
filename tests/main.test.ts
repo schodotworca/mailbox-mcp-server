@@ -3,7 +3,7 @@ import type { CalendarService } from "../src/services/CalendarService.js";
 import type { EmailService } from "../src/services/EmailService.js";
 import type { SmtpService } from "../src/services/SmtpService.js";
 import { createCalendarTools } from "../src/tools/calendarTools.js";
-import { createEmailTools } from "../src/tools/emailTools.js";
+import { createEmailTools, isEmailTool } from "../src/tools/emailTools.js";
 
 describe("main.ts module structure and logic", () => {
   describe("Tool Classification Arrays", () => {
@@ -307,29 +307,13 @@ describe("main.ts module structure and logic", () => {
         tool => tool.name,
       );
 
-      // Simulate the server's isEmailTool function
-      const isEmailTool = (toolName: string): boolean => {
-        return [
-          "search_emails",
-          "get_email",
-          "get_email_thread",
-          "send_email",
-          "create_draft",
-          "move_email",
-          "mark_email",
-          "delete_email",
-          "get_folders",
-          "create_directory",
-        ].includes(toolName);
-      };
-
       // Check that every implemented tool is registered in routing logic
       for (const toolName of implementedEmailToolNames) {
         expect(isEmailTool(toolName)).toBe(true);
       }
 
       // Verify we have the expected number of tools
-      expect(implementedEmailToolNames).toHaveLength(10);
+      expect(implementedEmailToolNames).toHaveLength(11);
       expect(implementedEmailToolNames).toContain("create_directory");
     });
 

@@ -94,6 +94,7 @@ vi.mock("imapflow", () => {
       return {
         connect: mockConnect,
         logout: mockLogout,
+        close: vi.fn(),
         mailboxOpen: mockMailboxOpen,
         search: mockSearch,
         fetch: mockFetch,
@@ -356,9 +357,10 @@ describe("EmailService", () => {
       const result = await emailService.searchEmails({ query: "test" });
 
       expect(result).toBe(mockMessages);
-      expect(mockCache.get).toHaveBeenCalledWith(
-        'email_search:{"query":"test"}',
-      );
+      const key = (mockCache.get as Mock).mock.calls[0][0];
+      const options = JSON.parse(key.slice("email_search:".length));
+      expect(options.query).toBe("test");
+      expect(options.since).toMatch(/T00:00:00.000Z$/);
     });
 
     it("should generate correct cache key for search options", () => {
