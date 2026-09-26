@@ -1,3 +1,4 @@
+import { simpleParser } from "mailparser";
 import { type Mock, beforeEach, describe, expect, it, vi } from "vitest";
 import type { ConnectionPoolConfig } from "../src/services/ConnectionPool.js";
 import type {
@@ -149,6 +150,8 @@ describe("SmtpService", () => {
     mockSendMail.mockResolvedValue({
       messageId: "test-message-id-123",
       response: "250 Message accepted",
+      accepted: ["john@example.com"],
+      rejected: [],
     });
     mockVerify.mockResolvedValue(true);
   });
@@ -166,26 +169,19 @@ describe("SmtpService", () => {
       const result = await smtpService.sendEmail(composition);
 
       expect(result.success).toBe(true);
-      expect(result.message).toBe("Email sent successfully");
-      expect(result.messageId).toBe("test-message-id-123");
+      expect(result.message).toBe("SMTP server accepted the email");
+      expect(result.messageId).toBe((await simpleParser(mockSendMail.mock.calls[0][0].raw)).messageId);
 
       // Verify pool operations
       expect(mockPool.acquire).toHaveBeenCalled();
       expect(mockPool.release).toHaveBeenCalledWith(mockWrapper);
 
-      expect(mockSendMail).toHaveBeenCalledWith({
-        from: {
-          name: "Test",
-          address: "test@example.com",
-        },
-        to: '"John Doe" <john@example.com>',
-        cc: undefined,
-        bcc: undefined,
-        subject: "Test Subject",
-        text: "Test email content",
-        html: undefined,
-        attachments: undefined,
-      });
+      const parsed = await simpleParser(mockSendMail.mock.calls[0][0].raw);
+      expect(parsed.from?.value).toEqual([{name:"Test",address:"test@example.com"}]);
+      expect(parsed.to?.value).toEqual(composition.to);
+      expect(parsed.subject).toBe(composition.subject);
+      expect(parsed.text?.trim()).toBe(composition.text);
+      expect(mockSendMail.mock.calls[0][0].envelope.to).toEqual(["john@example.com"]);
     });
 
     it("should send email with CC and BCC recipients", async () => {
@@ -196,12 +192,10 @@ describe("SmtpService", () => {
 
       await smtpService.sendEmail(composition);
 
-      expect(mockSendMail).toHaveBeenCalledWith(
-        expect.objectContaining({
-          cc: '"Jane Smith" <jane@example.com>',
-          bcc: "secret@example.com",
-        }),
-      );
+      const parsed = await simpleParser(mockSendMail.mock.calls[0][0].raw);
+      expect(parsed.cc?.value).toEqual(composition.cc);
+      expect(parsed.bcc).toBeUndefined();
+      expect(mockSendMail.mock.calls[0][0].envelope.to).toContain("secret@example.com");
     });
 
     it("should send email with HTML content", async () => {
@@ -211,11 +205,7 @@ describe("SmtpService", () => {
 
       await smtpService.sendEmail(composition);
 
-      expect(mockSendMail).toHaveBeenCalledWith(
-        expect.objectContaining({
-          html: "<h1>Test HTML Email</h1>",
-        }),
-      );
+      expect((await simpleParser(mockSendMail.mock.calls[0][0].raw)).html).toBe(composition.html);
     });
 
     it("should send email with attachments", async () => {
@@ -231,17 +221,10 @@ describe("SmtpService", () => {
 
       await smtpService.sendEmail(composition);
 
-      expect(mockSendMail).toHaveBeenCalledWith(
-        expect.objectContaining({
-          attachments: [
-            {
-              filename: "test.txt",
-              content: "Test file content",
-              contentType: "text/plain",
-            },
-          ],
-        }),
-      );
+      const parsed = await simpleParser(mockSendMail.mock.calls[0][0].raw);
+      expect(parsed.attachments[0].filename).toBe("test.txt");
+      expect(parsed.attachments[0].content.toString()).toBe("Test file content");
+      expect(parsed.attachments[0].contentType).toBe("text/plain");
     });
 
     it("should handle multiple recipients", async () => {
@@ -254,11 +237,7 @@ describe("SmtpService", () => {
 
       await smtpService.sendEmail(composition);
 
-      expect(mockSendMail).toHaveBeenCalledWith(
-        expect.objectContaining({
-          to: '"John Doe" <john@example.com>, jane@example.com',
-        }),
-      );
+      expect(mockSendMail.mock.calls[0][0].envelope.to).toEqual(["john@example.com", "jane@example.com"]);
     });
 
     it("should handle email sending errors", async () => {
@@ -270,7 +249,7 @@ describe("SmtpService", () => {
 
       expect(result.success).toBe(false);
       expect(result.message).toBe(
-        "Failed to send email: SMTP connection failed",
+        "SMTP delivery outcome is unknown. Do not resend automatically. SMTP connection failed",
       );
       expect(result.messageId).toBeUndefined();
     });
@@ -282,7 +261,7 @@ describe("SmtpService", () => {
       const result = await smtpService.sendEmail(composition);
 
       expect(result.success).toBe(false);
-      expect(result.message).toBe("Failed to send email: String error");
+      expect(result.message).toBe("SMTP delivery outcome is unknown. Do not resend automatically. String error");
     });
 
     it("should extract name from email address correctly", async () => {
@@ -312,14 +291,7 @@ describe("SmtpService", () => {
 
       await service.sendEmail(composition);
 
-      expect(mockSendMail).toHaveBeenCalledWith(
-        expect.objectContaining({
-          from: {
-            name: "John Doe",
-            address: "john.doe@example.com",
-          },
-        }),
-      );
+      expect((await simpleParser(mockSendMail.mock.calls[0][0].raw)).from?.value).toEqual([{name:"John Doe",address:"john.doe@example.com"}]);
     });
 
     it("should handle email with underscores and dashes in name extraction", async () => {
@@ -349,14 +321,7 @@ describe("SmtpService", () => {
 
       await service.sendEmail(composition);
 
-      expect(mockSendMail).toHaveBeenCalledWith(
-        expect.objectContaining({
-          from: {
-            name: "First Last Name",
-            address: "first_last-name@example.com",
-          },
-        }),
-      );
+      expect((await simpleParser(mockSendMail.mock.calls[0][0].raw)).from?.value).toEqual([{name:"First Last Name",address:"first_last-name@example.com"}]);
     });
   });
 
@@ -392,11 +357,7 @@ describe("SmtpService", () => {
 
       await smtpService.sendEmail(composition);
 
-      expect(mockSendMail).toHaveBeenCalledWith(
-        expect.objectContaining({
-          to: '"John Doe" <john@example.com>, "Jane Smith" <jane@example.com>',
-        }),
-      );
+      expect((await simpleParser(mockSendMail.mock.calls[0][0].raw)).to?.value).toEqual(composition.to);
     });
 
     it("should format addresses without names correctly", async () => {
@@ -406,11 +367,7 @@ describe("SmtpService", () => {
 
       await smtpService.sendEmail(composition);
 
-      expect(mockSendMail).toHaveBeenCalledWith(
-        expect.objectContaining({
-          to: "john@example.com, jane@example.com",
-        }),
-      );
+      expect((await simpleParser(mockSendMail.mock.calls[0][0].raw)).to?.value.map(a => a.address)).toEqual(["john@example.com", "jane@example.com"]);
     });
   });
 
@@ -458,7 +415,7 @@ describe("SmtpService", () => {
 
       expect(result.success).toBe(false);
       expect(result.message).toBe(
-        "Failed to send email: 535 Authentication failed",
+        "SMTP delivery outcome is unknown. Do not resend automatically. 535 Authentication failed",
       );
     });
 
@@ -469,7 +426,7 @@ describe("SmtpService", () => {
       const result = await smtpService.sendEmail(composition);
 
       expect(result.success).toBe(false);
-      expect(result.message).toBe("Failed to send email: Connection timeout");
+      expect(result.message).toBe("SMTP delivery outcome is unknown. Do not resend automatically. Connection timeout");
     });
   });
 
@@ -484,13 +441,7 @@ describe("SmtpService", () => {
       const result = await smtpService.sendEmail(composition);
 
       expect(result.success).toBe(true);
-      expect(mockSendMail).toHaveBeenCalledWith(
-        expect.objectContaining({
-          to: "",
-          subject: "",
-          text: "",
-        }),
-      );
+      expect(mockSendMail.mock.calls[0][0].envelope.to).toEqual([]);
     });
 
     it("should handle very long email content", async () => {
@@ -502,11 +453,7 @@ describe("SmtpService", () => {
       const result = await smtpService.sendEmail(composition);
 
       expect(result.success).toBe(true);
-      expect(mockSendMail).toHaveBeenCalledWith(
-        expect.objectContaining({
-          text: longContent,
-        }),
-      );
+      expect((await simpleParser(mockSendMail.mock.calls[0][0].raw)).text?.trim()).toBe(longContent);
     });
 
     it("should handle special characters in email content", async () => {

@@ -1,4 +1,4 @@
-import type { Transporter } from "nodemailer";
+import MailComposer from "nodemailer/lib/mail-composer/index.js";
 import type {
   EmailComposition,
   EmailOperationResult,
@@ -70,11 +70,9 @@ export class SmtpService {
           name: this.extractNameFromEmail(this.pool.connectionConfig.user),
           address: this.pool.connectionConfig.user,
         },
-        to: this.formatAddresses(composition.to),
-        cc: composition.cc ? this.formatAddresses(composition.cc) : undefined,
-        bcc: composition.bcc
-          ? this.formatAddresses(composition.bcc)
-          : undefined,
+        to: composition.to,
+        cc: composition.cc,
+        bcc: composition.bcc,
         subject: composition.subject,
         text: normalizedText,
         html: composition.html || generatedHtml,
@@ -85,8 +83,13 @@ export class SmtpService {
         })),
       };
 
+      // Compile exactly once. Bcc is retained in the SMTP envelope only.
+      const compiled = new MailComposer(mailOptions).compile();
+      const envelope = compiled.getEnvelope();
+      const messageId = compiled.messageId();
+      const rawMessage = await compiled.build();
       sendAttempted = true;
-      const info = await transporter.sendMail(mailOptions);
+      const info = await transporter.sendMail({ envelope, raw: rawMessage });
 
       const accepted = Array.isArray(info.accepted) ? info.accepted : [];
       const rejected = Array.isArray(info.rejected) ? info.rejected : [];
@@ -110,7 +113,8 @@ export class SmtpService {
           message: `Email was only partially accepted. Rejected recipients: ${rejected
             .map(String)
             .join(", ")}. Do not resend automatically.`,
-          messageId: info.messageId,
+          messageId,
+          rawMessage,
         };
       }
 
@@ -118,7 +122,8 @@ export class SmtpService {
         success: true,
         delivery: "accepted",
         message: "SMTP server accepted the email",
-        messageId: info.messageId,
+        messageId,
+        rawMessage,
       };
     } catch (error) {
       await this.logger.error(
@@ -174,19 +179,6 @@ export class SmtpService {
         await this.pool.release(wrapper);
       }
     }
-  }
-
-  private formatAddresses(
-    addresses: Array<{ name?: string; address: string }>,
-  ): string {
-    return addresses
-      .map(addr => {
-        if (addr.name) {
-          return `"${addr.name}" <${addr.address}>`;
-        }
-        return addr.address;
-      })
-      .join(", ");
   }
 
   private extractNameFromEmail(email: string): string {

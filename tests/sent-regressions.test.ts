@@ -43,3 +43,67 @@ describe('SMTP outcome isolation', () => {
     expect(sendMail).toHaveBeenCalledTimes(1);
   });
 });
+
+describe('identical SMTP and Sent MIME', () => {
+  it('uses the same bytes and Message-ID with Bcc only in the envelope', async () => {
+    const {simpleParser} = await import('mailparser');
+    const {EmailService} = await import('../src/services/EmailService.js');
+    const {service,sendMail} = smtpFixture();
+    const draft = {...composition, text:'Line one\nLine two\n\nParagraph', bcc:[{address:'hidden@example.com'}], subject:'Zażółć gęślą', attachments:[{filename:'test.txt', content:Buffer.from('Zażółć'),contentType:'text/plain'}]};
+    const result = await service.sendEmail(draft);
+    const smtp = sendMail.mock.calls[0][0];
+    expect(Buffer.isBuffer(smtp.raw)).toBe(true);
+    expect(smtp.envelope.to).toContain('hidden@example.com');
+    const append = vi.fn().mockResolvedValue({uid:42});
+    const email = Object.assign(Object.create(EmailService.prototype), {
+      pool: {acquire:vi.fn().mockResolvedValue({connection:{list:vi.fn().mockResolvedValue([{specialUse:'\\Sent',path:'Sent Messages'}]),append}}),release:vi.fn()},
+      cache:{}, logger:{error:vi.fn()}
+    });
+    expect((await email.saveSentCopy(result.rawMessage)).success).toBe(true);
+    expect(append.mock.calls[0][1]).toBe(smtp.raw);
+    const parsed = await simpleParser(smtp.raw);
+    expect(parsed.messageId).toBe(result.messageId);
+    expect(parsed.from?.value[0].address).toBe('sender@example.com');
+    expect(parsed.bcc).toBeUndefined();
+    expect(smtp.raw.toString()).not.toMatch(/^bcc:/im);
+    expect(smtp.raw.toString()).not.toContain('hidden@example.com');
+    expect(parsed.subject).toBe(draft.subject);
+    expect(parsed.text?.trim()).toBe(draft.text);
+    expect(parsed.html).toContain('<br>');
+    expect(parsed.attachments[0].content).toEqual(draft.attachments[0].content);
+  });
+});
+
+it('Nodemailer transport emits precisely the compiled bytes', async () => {
+  const nodemailer = await import('nodemailer');
+  const {service,sendMail} = smtpFixture();
+  const result = await service.sendEmail({...composition,bcc:[{address:'hidden@example.com'}]});
+  const options = sendMail.mock.calls[0][0];
+  const transport = nodemailer.default.createTransport({streamTransport:true,buffer:true,newline:'windows'});
+  const info = await transport.sendMail(options);
+  expect(info.message).toEqual(result.rawMessage);
+  expect(info.envelope.to).toContain('hidden@example.com');
+  transport.close();
+});
+
+it('does not archive or retry when all recipients are rejected', async () => {
+  const {service,sendMail} = smtpFixture();
+  sendMail.mockResolvedValue({accepted:[],rejected:['to@example.com']});
+  const email = {saveSentCopy:vi.fn()};
+  const result = await handleEmailTool('send_email',composition,email as any,service);
+  expect(result.isError).toBe(true);
+  expect(email.saveSentCopy).not.toHaveBeenCalled();
+  expect(sendMail).toHaveBeenCalledTimes(1);
+});
+
+it('does not claim archival success when APPEND returns false', async () => {
+  const {EmailService} = await import('../src/services/EmailService.js');
+  const append = vi.fn().mockResolvedValue(false);
+  const email = Object.assign(Object.create(EmailService.prototype), {
+    pool:{acquire:vi.fn().mockResolvedValue({connection:{list:vi.fn().mockResolvedValue([{specialUse:'\\Sent',path:'Sent'}]),append}}),release:vi.fn()},
+    cache:{},logger:{error:vi.fn()}
+  });
+  const result = await email.saveSentCopy(Buffer.from('From: a@example.com\r\n\r\nBody'));
+  expect(result.success).toBe(false);
+  expect(append).toHaveBeenCalledTimes(1);
+});

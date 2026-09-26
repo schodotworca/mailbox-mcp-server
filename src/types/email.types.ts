@@ -90,6 +90,8 @@ export interface EmailFolder {
 }
 
 export interface EmailOperationResult {
+  /** Internal MIME bytes for Sent archival; never include in tool responses. */
+  rawMessage?: Buffer;
   delivery?: "accepted" | "partial" | "not-sent" | "unknown";
   success: boolean;
   message: string;

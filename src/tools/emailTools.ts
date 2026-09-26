@@ -589,7 +589,9 @@ ${thread.messages
         // into a generic send error or trigger a second SMTP submission.
         let sentCopyResult;
         try {
-          sentCopyResult = await emailService.saveSentCopy(composition);
+          sentCopyResult = result.rawMessage
+            ? await emailService.saveSentCopy(result.rawMessage)
+            : { success: false, message: "SMTP did not provide the original MIME message; refusing to reconstruct a different copy." };
         } catch (error) {
           sentCopyResult = { success: false, message: error instanceof Error ? error.message : String(error) };
         }

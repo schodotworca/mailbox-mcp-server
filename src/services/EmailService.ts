@@ -745,16 +745,22 @@ export class EmailService {
       }
     }
   }
-    async saveSentCopy(
-    composition: EmailComposition,
+  async saveSentCopy(
+    rawMessage: Buffer,
   ): Promise<EmailOperationResult> {
     let wrapper: ImapConnectionWrapper | null = null;
+    let timer: ReturnType<typeof setTimeout> | undefined;
 
     try {
       wrapper = await this.pool.acquire();
 
+      if (!Buffer.isBuffer(rawMessage) || rawMessage.length === 0) {
+        throw new Error("Original SMTP MIME bytes are required");
+      }
+      const connection = wrapper.connection;
+      const archive = async () => {
       // Find the mailbox that the IMAP server identifies as the Sent folder.
-      const folders = await wrapper.connection.list();
+      const folders = await connection.list();
 
       const sentFolder = folders.find(folder => {
         const specialUse = folder.specialUse?.toLowerCase();
@@ -768,21 +774,31 @@ export class EmailService {
         };
       }
 
-      const emailContent = this.buildEmailContent(composition);
-
-      await wrapper.connection.append(
+      const appended = await connection.append(
         sentFolder.path,
-        emailContent,
+        rawMessage,
         ["\\Seen"],
         new Date(),
       );
 
+      if (!appended) throw new Error("IMAP server did not confirm APPEND");
       this.clearFolderCache(sentFolder.path);
 
       return {
         success: true,
         message: `Sent copy saved successfully in ${sentFolder.path}`,
       };
+      };
+      return await Promise.race([
+        archive(),
+        new Promise<EmailOperationResult>((_, reject) => {
+          timer = setTimeout(() => {
+            wrapper!.isHealthy = false;
+            connection.close();
+            reject(new Error("Sent archive timed out; APPEND outcome may be unknown. Do not retry automatically."));
+          }, 10000);
+        }),
+      ]);
     } catch (error) {
       await this.logger.error(
         "Failed to save sent email copy",
@@ -802,6 +818,7 @@ export class EmailService {
         }`,
       };
     } finally {
+      clearTimeout(timer);
       if (wrapper) {
         await this.pool.release(wrapper);
       }
