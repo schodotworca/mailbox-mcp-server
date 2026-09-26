@@ -33,7 +33,7 @@ export class SmtpService {
     });
   }
 
-  async sendEmail(
+    async sendEmail(
     composition: EmailComposition,
   ): Promise<EmailOperationResult> {
     let wrapper: SmtpConnectionWrapper | null = null;
@@ -41,6 +41,28 @@ export class SmtpService {
     try {
       wrapper = await this.pool.acquire();
       const transporter = wrapper.connection;
+
+      const normalizedText = composition.text
+        ? composition.text.replace(/\r?\n/g, "\r\n")
+        : undefined;
+
+      const generatedHtml =
+        !composition.html && normalizedText
+          ? normalizedText
+              .split(/\r\n\r\n+/)
+              .map(paragraph => {
+                const escaped = paragraph
+                  .replace(/&/g, "&amp;")
+                  .replace(/</g, "&lt;")
+                  .replace(/>/g, "&gt;")
+                  .replace(/"/g, "&quot;")
+                  .replace(/'/g, "&#039;")
+                  .replace(/\r\n/g, "<br>");
+
+                return `<p>${escaped}</p>`;
+              })
+              .join("")
+          : undefined;
 
       const mailOptions = {
         from: {
@@ -53,8 +75,8 @@ export class SmtpService {
           ? this.formatAddresses(composition.bcc)
           : undefined,
         subject: composition.subject,
-        text: composition.text,
-        html: composition.html,
+        text: normalizedText,
+        html: composition.html || generatedHtml,
         attachments: composition.attachments?.map(att => ({
           filename: att.filename,
           content: att.content,
@@ -64,9 +86,33 @@ export class SmtpService {
 
       const info = await transporter.sendMail(mailOptions);
 
+      const accepted = Array.isArray(info.accepted) ? info.accepted : [];
+      const rejected = Array.isArray(info.rejected) ? info.rejected : [];
+
+      if (accepted.length === 0) {
+        return {
+          success: false,
+          message: `SMTP server did not accept any recipients${
+            rejected.length > 0
+              ? `; rejected: ${rejected.map(String).join(", ")}`
+              : ""
+          }`,
+        };
+      }
+
+      if (rejected.length > 0) {
+        return {
+          success: false,
+          message: `Email was only partially accepted. Rejected recipients: ${rejected
+            .map(String)
+            .join(", ")}`,
+          messageId: info.messageId,
+        };
+      }
+
       return {
         success: true,
-        message: "Email sent successfully",
+        message: "SMTP server accepted the email",
         messageId: info.messageId,
       };
     } catch (error) {
@@ -81,9 +127,12 @@ export class SmtpService {
           error: error instanceof Error ? error.message : String(error),
         },
       );
+
       return {
         success: false,
-        message: `Failed to send email: ${error instanceof Error ? error.message : String(error)}`,
+        message: `Failed to send email: ${
+          error instanceof Error ? error.message : String(error)
+        }`,
       };
     } finally {
       if (wrapper) {
