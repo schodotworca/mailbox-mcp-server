@@ -62,3 +62,28 @@ describe('real ParsedMail addresses', () => {
     expect(message.bcc).toEqual([]);
   });
 });
+
+describe('IMAP failures are not missing mail', () => {
+  it('propagates pool acquisition timeout when there is no cached mail', async () => {
+    const {service} = fixture();
+    (service as any).pool.acquireForFolder.mockRejectedValue(new Error('Connection acquire timeout after 100ms'));
+    await expect(service.getEmail(123)).rejects.toThrow('acquire timeout');
+  });
+  it('propagates search connection failures instead of reporting an empty range', async () => {
+    const {service, connection} = fixture();
+    connection.search.mockRejectedValue(new Error('Connection closed'));
+    await expect(service.searchEmails({before:new Date('2099-01-01')})).rejects.toThrow('Connection closed');
+  });
+  it('closes a timed-out fetch and never caches not-found', async () => {
+    vi.useFakeTimers();
+    const {service, connection, cache, wrapper} = fixture();
+    const close = vi.fn(); Object.assign(connection, {close});
+    connection.fetch.mockReturnValue({next: () => new Promise(() => {}), [Symbol.asyncIterator]() { return this; }});
+    const operation = expect(service.getEmail(123)).rejects.toThrow('timed out');
+    await vi.advanceTimersByTimeAsync(10001); await operation;
+    expect(close).toHaveBeenCalledTimes(1);
+    expect(wrapper.isHealthy).toBe(false);
+    expect(cache.set).not.toHaveBeenCalled();
+    expect(vi.getTimerCount()).toBe(0);
+  });
+});

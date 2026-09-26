@@ -26,6 +26,9 @@ export interface CacheFallbackOptions<T> {
    */
   defaultValue: T;
 
+  /** Preserve operational errors when no cached data exists. */
+  throwWhenUnavailable?: boolean;
+
   /**
    * Logger instance for logging warnings and errors
    */
@@ -121,6 +124,8 @@ export async function withCacheFallback<T>(
         );
         return staleData;
       }
+
+      if (options.throwWhenUnavailable) throw error;
 
       // Return default value if no stale cache available
       await logger.warning(

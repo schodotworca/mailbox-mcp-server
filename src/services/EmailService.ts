@@ -122,6 +122,7 @@ export class EmailService {
       }
     },
     defaultValue: [],
+    throwWhenUnavailable: true,
     logger: this.logger,
     operation: "searchEmails",
     service: "EmailService",
@@ -149,6 +150,7 @@ export class EmailService {
           return message;
         },
         defaultValue: null,
+        throwWhenUnavailable: true,
         logger: this.logger,
         operation: "getEmail",
         service: "EmailService",
@@ -330,8 +332,11 @@ export class EmailService {
     const timeoutMs = 10000; // 10 seconds timeout for fetch operation
     const fetchPromise = this.performFetch(wrapper, uid);
 
+    let timer: ReturnType<typeof setTimeout>;
     const timeoutPromise = new Promise<null>((_, reject) => {
-      setTimeout(() => {
+      timer = setTimeout(() => {
+        wrapper.isHealthy = false;
+        wrapper.connection.close();
         reject(
           new Error(`IMAP fetch operation timed out after ${timeoutMs}ms`),
         );
@@ -358,7 +363,9 @@ export class EmailService {
       // IMAP connection in a corrupted state. Marking it unhealthy ensures
       // it won't be reused and will be destroyed on next validation.
       wrapper.isHealthy = false;
-      return null;
+      throw error;
+    } finally {
+      clearTimeout(timer!);
     }
   }
 
