@@ -576,65 +576,38 @@ ${thread.messages
           html: validatedArgs.html,
         };
 
-           const result = await smtpService.sendEmail(composition);
+        const result = await smtpService.sendEmail(composition);
 
         if (!result.success) {
           return {
-            content: [
-              {
-                type: "text",
-                text: `❌ Failed to send email: ${result.message}`,
-              },
-            ],
+            content: [{ type: "text", text: result.message }],
             isError: true,
           };
         }
 
-        // SMTP has already accepted the message.
-        // From this point onward we must NEVER retry the SMTP send
-        // just because saving the Sent copy fails.
-        const sentCopyResult = await emailService.saveSentCopy(composition);
-
-        if (!sentCopyResult.success) {
-          return {
-            content: [
-              {
-                type: "text",
-                text: `⚠️ Email was accepted by the SMTP server, but the copy could not be saved in the Sent folder.
+        // SMTP acceptance is final for this call. Sent failures must not turn
+        // into a generic send error or trigger a second SMTP submission.
+        let sentCopyResult;
+        try {
+          sentCopyResult = await emailService.saveSentCopy(composition);
+        } catch (error) {
+          sentCopyResult = { success: false, message: error instanceof Error ? error.message : String(error) };
+        }
+        const deliverySummary = result.delivery === "partial"
+          ? result.message
+          : "Email was accepted by the SMTP server.";
+        return {
+          content: [{
+            type: "text",
+            text: `${sentCopyResult.success ? "✅" : "⚠️"} ${deliverySummary}
 
 **Subject:** ${validatedArgs.subject}
-**To:** ${validatedArgs.to
-                  .map(
-                    (r: { name?: string; address: string }) =>
-                      `${r.name || ""} <${r.address}>`,
-                  )
-                  .join(", ")}
+**To:** ${validatedArgs.to.map(r => `${r.name || ""} <${r.address}>`).join(", ")}
 **Message ID:** ${result.messageId || "Unknown"}
 
-Do not resend automatically. The recipient may already have received this email.
-
-Sent-copy error: ${sentCopyResult.message}`,
-              },
-            ],
-          };
-        }
-
-        return {
-          content: [
-            {
-              type: "text",
-              text: `✅ Email sent successfully and a copy was saved in the Sent folder.
-
-**Subject:** ${validatedArgs.subject}
-**To:** ${validatedArgs.to
-                .map(
-                  (r: { name?: string; address: string }) =>
-                    `${r.name || ""} <${r.address}>`,
-                )
-                .join(", ")}
-**Message ID:** ${result.messageId || "Unknown"}`,
-            },
-          ],
+${sentCopyResult.success ? "A copy was saved in the Sent folder." : `The copy could not be saved in the Sent folder: ${sentCopyResult.message}`}
+Do not resend automatically. SMTP has already accepted the message for at least one recipient.`,
+          }],
         };
       }
 

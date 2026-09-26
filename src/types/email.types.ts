@@ -90,6 +90,7 @@ export interface EmailFolder {
 }
 
 export interface EmailOperationResult {
+  delivery?: "accepted" | "partial" | "not-sent" | "unknown";
   success: boolean;
   message: string;
   messageId?: string;

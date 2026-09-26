@@ -37,6 +37,7 @@ export class SmtpService {
     composition: EmailComposition,
   ): Promise<EmailOperationResult> {
     let wrapper: SmtpConnectionWrapper | null = null;
+    let sendAttempted = false;
 
     try {
       wrapper = await this.pool.acquire();
@@ -84,6 +85,7 @@ export class SmtpService {
         })),
       };
 
+      sendAttempted = true;
       const info = await transporter.sendMail(mailOptions);
 
       const accepted = Array.isArray(info.accepted) ? info.accepted : [];
@@ -92,6 +94,7 @@ export class SmtpService {
       if (accepted.length === 0) {
         return {
           success: false,
+          delivery: "not-sent",
           message: `SMTP server did not accept any recipients${
             rejected.length > 0
               ? `; rejected: ${rejected.map(String).join(", ")}`
@@ -102,16 +105,18 @@ export class SmtpService {
 
       if (rejected.length > 0) {
         return {
-          success: false,
+          success: true,
+          delivery: "partial",
           message: `Email was only partially accepted. Rejected recipients: ${rejected
             .map(String)
-            .join(", ")}`,
+            .join(", ")}. Do not resend automatically.`,
           messageId: info.messageId,
         };
       }
 
       return {
         success: true,
+        delivery: "accepted",
         message: "SMTP server accepted the email",
         messageId: info.messageId,
       };
@@ -123,20 +128,26 @@ export class SmtpService {
           service: "SmtpService",
         },
         {
-          composition,
           error: error instanceof Error ? error.message : String(error),
         },
       );
 
       return {
         success: false,
-        message: `Failed to send email: ${
+        delivery: sendAttempted ? "unknown" : "not-sent",
+        message: `${sendAttempted ? "SMTP delivery outcome is unknown. Do not resend automatically." : "Email was not submitted to SMTP."} ${
           error instanceof Error ? error.message : String(error)
         }`,
       };
     } finally {
       if (wrapper) {
-        await this.pool.release(wrapper);
+        try {
+          await this.pool.release(wrapper);
+        } catch (error) {
+          await this.logger.warning("SMTP pool cleanup failed; preserving delivery outcome", {
+            operation: "sendEmail", service: "SmtpService",
+          }, { error: error instanceof Error ? error.message : String(error) });
+        }
       }
     }
   }
