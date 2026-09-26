@@ -44,3 +44,21 @@ describe('date search and UID regressions', () => {
     expect(offline.filterOfflineResults([{date: boundary}], {before: boundary})).toEqual([]);
   });
 });
+
+describe('real ParsedMail addresses', () => {
+  it('reads From, repeated To, groups and Cc from actual MIME parsing', async () => {
+    const {simpleParser} = await import('mailparser');
+    const parsed = await simpleParser(Buffer.from([
+      'From: =?UTF-8?Q?Za=C5=BC=C3=B3=C5=82=C4=87?= <sender@example.com>',
+      'To: Team: Alice <alice@example.com>, Bob <bob@example.com>;',
+      'To: Carol <carol@example.com>', 'Cc: copy@example.com',
+      'Subject: address regression', '', 'Body'
+    ].join('\r\n')));
+    const {service} = fixture();
+    const message = (service as any).parseFullEmailMessage(parsed, {uid: 123, flags: []}, 'INBOX');
+    expect(message.from).toEqual([{name:'Zażółć', address:'sender@example.com'}]);
+    expect(message.to.map(a => a.address)).toEqual(['alice@example.com','bob@example.com','carol@example.com']);
+    expect(message.cc.map(a => a.address)).toEqual(['copy@example.com']);
+    expect(message.bcc).toEqual([]);
+  });
+});

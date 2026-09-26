@@ -634,18 +634,21 @@ export class EmailService {
   private parseAddressesFromParsed(
     addresses: unknown,
   ): Array<{ name?: string; address: string }> {
-    if (!addresses) return [];
-    if (!Array.isArray(addresses)) {
-      const addr = addresses as { name?: string; address: string };
-      if (addr.address) {
-        return [{ name: addr.name, address: addr.address }];
-      }
-      return [];
+    if (!addresses || typeof addresses !== "object") return [];
+    if (Array.isArray(addresses)) {
+      return addresses.flatMap(address => this.parseAddressesFromParsed(address));
     }
-    return addresses.map(addr => ({
-      name: addr.name,
-      address: addr.address,
-    }));
+    const entry = addresses as {
+      value?: unknown;
+      group?: unknown;
+      name?: string;
+      address?: string;
+    };
+    if (Array.isArray(entry.value)) return this.parseAddressesFromParsed(entry.value);
+    if (Array.isArray(entry.group)) return this.parseAddressesFromParsed(entry.group);
+    return typeof entry.address === "string" && entry.address
+      ? [{ name: entry.name, address: entry.address }]
+      : [];
   }
 
   private async buildEmailThread(
