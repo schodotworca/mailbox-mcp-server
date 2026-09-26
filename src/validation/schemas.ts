@@ -19,7 +19,27 @@ export const sanitizeString = (str: string): string => {
     })
     .join("");
 };
+export const sanitizeTextContent = (str: string): string => {
+  return str
+    .trim()
+    .split("")
+    .filter(char => {
+      const code = char.charCodeAt(0);
 
+      // Preserve formatting characters used in plain-text email:
+      // tab (9), line feed (10), carriage return (13)
+      if (code === 9 || code === 10 || code === 13) {
+        return true;
+      }
+
+      return (
+        !(code >= 0 && code <= 31) &&
+        code !== 127 &&
+        !(code >= 128 && code <= 159)
+      );
+    })
+    .join("");
+};
 export const sanitizeHtml = (html: string): string => {
   // Basic HTML sanitization - remove dangerous tags and attributes
   return html
@@ -65,7 +85,7 @@ const subjectSchema = v.pipe(
 const textContentSchema = v.pipe(
   v.string("Text content must be a string"),
   v.maxLength(1000000, "Text content too long"), // 1MB limit
-  v.transform(sanitizeString),
+  v.transform(sanitizeTextContent),
 );
 
 // HTML content validation
