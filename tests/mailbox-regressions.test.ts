@@ -26,7 +26,7 @@ describe('date search and UID regressions', () => {
   ])('preserves explicit date criteria and fetches stable UIDs: %j', async options => {
     const {service, connection} = fixture();
     expect((await service.searchEmails(options)).map(m => m.uid)).toEqual([209,104]);
-    expect(connection.search).toHaveBeenCalledWith(options, {uid: true});
+    expect(connection.search).toHaveBeenCalledWith(Object.fromEntries(Object.entries(options).map(([k,v]) => [k,v.toISOString().slice(0,10)])), {uid: true});
     expect(connection.fetch).toHaveBeenCalledWith([209,104], expect.anything(), {uid:true});
   });
   it('uses a stable six-calendar-month default with month-end clamping', async () => {
@@ -36,7 +36,7 @@ describe('date search and UID regressions', () => {
     vi.setSystemTime(new Date('2026-08-31T11:00:00Z'));
     await service.searchEmails({});
     expect(connection.search).toHaveBeenCalledTimes(1);
-    expect(connection.search).toHaveBeenCalledWith({since: new Date('2026-02-28T00:00:00Z')}, {uid: true});
+    expect(connection.search).toHaveBeenCalledWith({since: '2026-02-28'}, {uid: true});
   });
   it('treats offline before as exclusive', () => {
     const offline = Object.create(OfflineService.prototype);
@@ -85,5 +85,23 @@ describe('IMAP failures are not missing mail', () => {
     expect(wrapper.isHealthy).toBe(false);
     expect(cache.set).not.toHaveBeenCalled();
     expect(vi.getTimerCount()).toBe(0);
+  });
+});
+
+describe('wire-level date search compilation', () => {
+  it.each([[[]], [['WITHIN']]])('uses absolute date commands with capabilities %j', async capabilities => {
+    const {createRequire} = await import('node:module');
+    const {searchCompiler} = createRequire(import.meta.url)('imapflow/lib/search-compiler.js');
+    const {service} = fixture();
+    const criteria = (service as any).buildSearchCriteria({since:new Date('2020-01-01'),before:new Date('2099-01-01')});
+    const wire = searchCompiler({capabilities:new Set(capabilities),enabled:new Set()},criteria).map(x=>x.value);
+    expect(wire).toEqual(['SINCE','01-Jan-2020','BEFORE','01-Jan-2099']);
+  });
+  it('does not shift an explicit before day when an ISO time is supplied', async () => {
+    const {createRequire} = await import('node:module');
+    const {searchCompiler} = createRequire(import.meta.url)('imapflow/lib/search-compiler.js');
+    const {service} = fixture();
+    const criteria = (service as any).buildSearchCriteria({before:new Date('2026-09-26T12:00:00Z')});
+    expect(searchCompiler({capabilities:new Set(),enabled:new Set()},criteria).map(x=>x.value)).toEqual(['BEFORE','26-Sep-2026']);
   });
 });

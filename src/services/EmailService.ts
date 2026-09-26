@@ -3,8 +3,8 @@ import { type ParsedMail, simpleParser } from "mailparser";
 // IMAP library type definitions
 interface ImapSearchCriteria {
   all?: boolean;
-  since?: Date;
-  before?: Date;
+  since?: string;
+  before?: string;
   from?: string;
   to?: string;
   subject?: string;
@@ -432,10 +432,12 @@ export class EmailService {
     options: EmailSearchOptions,
   ): ImapSearchCriteria {
     if (options.since) {
-      criteria.since = options.since;
+      // Date objects trigger ImapFlow's WITHIN conversion (including invalid
+      // OLDER 0 for future dates). Strings retain absolute calendar-day search.
+      criteria.since = options.since.toISOString().slice(0, 10);
     }
     if (options.before) {
-      criteria.before = options.before;
+      criteria.before = options.before.toISOString().slice(0, 10);
     }
     return criteria;
   }

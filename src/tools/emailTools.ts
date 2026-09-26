@@ -70,13 +70,13 @@ export function createEmailTools(
             type: "string",
             format: "date-time",
             description:
-              "Only return emails newer than this date (ISO 8601 format). Supplying an explicit date range overrides the default 6-month search window.",
+              "Include messages whose IMAP internal date is on or after this calendar day (ISO 8601; UTC date portion, time ignored). Supplying an explicit date range overrides the default 6-month search window.",
           },
           before: {
             type: "string",
             format: "date-time",
             description:
-              "Only return emails older than this date (ISO 8601 format). Supplying an explicit date range overrides the default 6-month search window.",
+              "Include messages whose IMAP internal date is strictly before this calendar day (ISO 8601; UTC date portion, time ignored). The boundary day is excluded; future dates are allowed. Supplying an explicit date range overrides the default 6-month search window.",
           },
           limit: {
             type: "number",

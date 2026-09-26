@@ -201,13 +201,13 @@ describe("EmailService", () => {
     it("should build since criteria for date filter", () => {
       const date = new Date("2024-01-01");
       const result = buildSearchCriteria({ since: date });
-      expect(result).toEqual({ since: date });
+      expect(result).toEqual({ since: "2024-01-01" });
     });
 
     it("should build before criteria for date filter", () => {
       const date = new Date("2024-01-31");
       const result = buildSearchCriteria({ before: date });
-      expect(result).toEqual({ before: date });
+      expect(result).toEqual({ before: "2024-01-31" });
     });
 
     it("should combine both date filters", () => {
@@ -215,8 +215,8 @@ describe("EmailService", () => {
       const before = new Date("2024-01-31");
       const result = buildSearchCriteria({ since, before });
       expect(result).toEqual({
-        since: since,
-        before: before,
+        since: "2024-01-01",
+        before: "2024-01-31",
       });
     });
 
@@ -227,7 +227,7 @@ describe("EmailService", () => {
         since,
       });
       expect(result).toEqual({
-        since: since,
+        since: "2024-01-01",
         or: [{ subject: "important" }, { body: "important" }],
       });
     });
@@ -251,8 +251,8 @@ describe("EmailService", () => {
         before,
       });
       expect(result).toEqual({
-        since: since,
-        before: before,
+        since: "2024-01-01",
+        before: "2024-01-31",
       });
     });
 
@@ -272,7 +272,7 @@ describe("EmailService", () => {
 
       // Should return date filter and let query be handled in memory
       expect(result).toBeDefined();
-      expect(result).toEqual({ since: new Date("2025-05-31T00:00:00Z") });
+      expect(result).toEqual({ since: "2025-05-31" });
     });
   });
 
