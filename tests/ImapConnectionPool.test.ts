@@ -36,6 +36,8 @@ class MockImapFlow {
     this.usable = true;
   }
 
+  close(): void { this.usable = false; }
+
   async logout(): Promise<void> {
     this.usable = false;
   }

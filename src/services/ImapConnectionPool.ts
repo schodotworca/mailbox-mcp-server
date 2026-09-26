@@ -70,6 +70,7 @@ export class ImapConnectionPool extends ConnectionPool<ImapFlow> {
   }
 
   async validateConnection(connection: ImapFlow): Promise<boolean> {
+    let timer: ReturnType<typeof setTimeout> | undefined;
     try {
       // Check if connection is still alive by getting capabilities
       if (!connection.usable) {
@@ -80,8 +81,8 @@ export class ImapConnectionPool extends ConnectionPool<ImapFlow> {
       // to prevent hanging on stuck connections
       const noopPromise = connection.noop();
       const timeoutPromise = new Promise<never>((_, reject) => {
-        setTimeout(
-          () => reject(new Error("Connection validation timeout")),
+        timer = setTimeout(
+          () => { connection.close(); reject(new Error("Connection validation timeout")); },
           3000,
         );
       });
@@ -98,13 +99,21 @@ export class ImapConnectionPool extends ConnectionPool<ImapFlow> {
         { error: error instanceof Error ? error.message : String(error) },
       );
       return false;
+    } finally {
+      clearTimeout(timer);
     }
   }
 
   async destroyConnection(connection: ImapFlow): Promise<void> {
+    let timer: ReturnType<typeof setTimeout> | undefined;
     try {
       if (connection.usable) {
-        await connection.logout();
+        await Promise.race([
+          connection.logout(),
+          new Promise<void>(resolve => {
+            timer = setTimeout(() => { connection.close(); resolve(); }, 1000);
+          }),
+        ]);
       }
     } catch (error) {
       await this.logger.warning(
@@ -115,11 +124,14 @@ export class ImapConnectionPool extends ConnectionPool<ImapFlow> {
         },
         { error: error instanceof Error ? error.message : String(error) },
       );
+    } finally {
+      clearTimeout(timer);
     }
   }
 
   async acquireForFolder(folder: string): Promise<ImapConnectionWrapper> {
     const wrapper = (await this.acquire()) as ImapConnectionWrapper;
+    let timer: ReturnType<typeof setTimeout> | undefined;
 
     try {
       // Ensure the correct folder is selected
@@ -127,8 +139,8 @@ export class ImapConnectionPool extends ConnectionPool<ImapFlow> {
         // Add timeout protection to prevent hanging on mailboxOpen
         const openPromise = wrapper.connection.mailboxOpen(folder);
         const timeoutPromise = new Promise<never>((_, reject) => {
-          setTimeout(
-            () => reject(new Error("Folder selection timed out after 5000ms")),
+          timer = setTimeout(
+            () => { wrapper.connection.close(); reject(new Error("Folder selection timed out after 5000ms")); },
             5000,
           );
         });
@@ -145,6 +157,8 @@ export class ImapConnectionPool extends ConnectionPool<ImapFlow> {
       throw new Error(
         `Failed to select folder ${folder}: ${error instanceof Error ? error.message : String(error)}`,
       );
+    } finally {
+      clearTimeout(timer);
     }
   }
 
@@ -162,6 +176,7 @@ export class ImapConnectionPool extends ConnectionPool<ImapFlow> {
       imapWrapper.selectedFolder = undefined;
     }
 
+    if (!wrapper.isHealthy) wrapper.connection.close();
     await super.release(wrapper);
   }
 

@@ -602,7 +602,8 @@ describe("ConnectionPool", () => {
       (pool as TestableConnectionPool<MockConnection>).updateMetrics();
 
       const metrics = pool.getMetrics();
-      expect(metrics.unhealthyConnections).toBe(1);
+      expect(metrics.unhealthyConnections).toBe(0);
+      expect(metrics.totalDestroyed).toBe(1);
       expect(metrics.healthyConnections).toBe(0);
     });
   });

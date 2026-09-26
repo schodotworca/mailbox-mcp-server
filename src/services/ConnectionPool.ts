@@ -118,6 +118,7 @@ export abstract class ConnectionPool<T> {
 
       // Wait for a connection to become available
       const wrapper = await this.waitForConnection();
+      this.metrics.waitingRequests--;
       return wrapper;
     } catch (error) {
       this.metrics.waitingRequests--;
@@ -145,6 +146,11 @@ export abstract class ConnectionPool<T> {
     this.metrics.idleConnections++;
     this.metrics.totalReleased++;
 
+    // Remove failed connections immediately, even when nobody is waiting.
+    if (!wrapper.isHealthy) {
+      await this.destroyConnectionWrapper(wrapper);
+    }
+
     // Process waiting queue
     if (this.waitingQueue.length > 0) {
       const request = this.waitingQueue.shift();
@@ -163,21 +169,6 @@ export abstract class ConnectionPool<T> {
           },
           { connectionId: wrapper.id },
         );
-
-        // Destroy the unhealthy connection (don't await to avoid blocking)
-        this.destroyConnectionWrapper(wrapper).catch(error => {
-          this.logger.warning(
-            "Error destroying unhealthy connection in background",
-            {
-              operation: "release",
-              service: "ConnectionPool",
-            },
-            {
-              connectionId: wrapper.id,
-              error: error instanceof Error ? error.message : String(error),
-            },
-          );
-        });
 
         // Try to create a new connection for the waiting request
         try {
@@ -364,7 +355,6 @@ export abstract class ConnectionPool<T> {
         const index = this.waitingQueue.indexOf(request);
         if (index !== -1) {
           this.waitingQueue.splice(index, 1);
-          this.metrics.waitingRequests--;
         }
         request.reject(
           new Error(
