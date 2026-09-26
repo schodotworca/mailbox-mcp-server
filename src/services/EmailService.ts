@@ -730,6 +730,68 @@ export class EmailService {
       }
     }
   }
+    async saveSentCopy(
+    composition: EmailComposition,
+  ): Promise<EmailOperationResult> {
+    let wrapper: ImapConnectionWrapper | null = null;
+
+    try {
+      wrapper = await this.pool.acquire();
+
+      // Find the mailbox that the IMAP server identifies as the Sent folder.
+      const folders = await wrapper.connection.list();
+
+      const sentFolder = folders.find(folder => {
+        const specialUse = folder.specialUse?.toLowerCase();
+        return specialUse === "\\sent";
+      });
+
+      if (!sentFolder) {
+        return {
+          success: false,
+          message: "Could not find the IMAP Sent folder",
+        };
+      }
+
+      const emailContent = this.buildEmailContent(composition);
+
+      await wrapper.connection.append(
+        sentFolder.path,
+        emailContent,
+        ["\\Seen"],
+        new Date(),
+      );
+
+      this.clearFolderCache(sentFolder.path);
+
+      return {
+        success: true,
+        message: `Sent copy saved successfully in ${sentFolder.path}`,
+      };
+    } catch (error) {
+      await this.logger.error(
+        "Failed to save sent email copy",
+        {
+          operation: "saveSentCopy",
+          service: "EmailService",
+        },
+        {
+          error: error instanceof Error ? error.message : String(error),
+        },
+      );
+
+      return {
+        success: false,
+        message: `Email was sent, but the Sent copy could not be saved: ${
+          error instanceof Error ? error.message : String(error)
+        }`,
+      };
+    } finally {
+      if (wrapper) {
+        await this.pool.release(wrapper);
+      }
+    }
+  }
   async moveEmail(
     uid: number,
     fromFolder: string,
