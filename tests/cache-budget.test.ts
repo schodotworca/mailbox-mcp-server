@@ -1,7 +1,23 @@
+import { withCacheFallback } from "../src/utils/cacheFallback.js";
 import { describe, expect, it, vi } from "vitest";
 import { MemoryCache } from "../src/services/LocalCache.js";
 const config = { email: { searchTtl: 100, messageTtl: 100, threadTtl: 100 }, calendar: { eventsTtl: 100, freeBusyTtl: 100 }, maxSize: 100, cleanupInterval: 10000, maxBytes: 1500, staleRetentionMs: 1000 };
 describe("cache memory safeguards", () => {
+  it("retains expired data through get/has for fallback, then expires it permanently", async () => {
+    vi.useFakeTimers();
+    const cache = new MemoryCache(config);
+    try {
+      cache.set("mail", "cached body", 100);
+      vi.advanceTimersByTime(101);
+      expect(cache.has("mail")).toBe(false);
+      const options = {cache, cacheKey:"mail", fetch:vi.fn().mockRejectedValue(new Error("connection lost")), defaultValue:null,
+        throwWhenUnavailable:true, logger:{error:vi.fn(),warning:vi.fn()} as any, operation:"test",service:"test"};
+      expect(await withCacheFallback(options)).toBe("cached body");
+      vi.advanceTimersByTime(1000);
+      await expect(withCacheFallback(options)).rejects.toThrow("connection lost");
+      expect(cache.size()).toBe(0);
+    } finally { cache.destroy(); vi.useRealTimers(); }
+  });
   it("never extends freshness when the same search is repeatedly read", () => {
     vi.useFakeTimers();
     const cache = new MemoryCache(config);

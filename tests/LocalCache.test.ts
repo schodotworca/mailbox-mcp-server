@@ -176,12 +176,12 @@ describe("MemoryCache", () => {
       // getStale() should still return the data even when expired
       expect(cache.getStale("test-key")).toBe("test-data");
 
-      // get() should return null for expired data (this will delete the entry)
+      // Normal reads hide expired data but retain it for fallback.
       expect(cache.get("test-key")).toBeNull();
       expect(cache.has("test-key")).toBe(false);
 
-      // Now getStale() should return null because the entry was deleted by get()
-      expect(cache.getStale("test-key")).toBeNull();
+      // Stale fallback remains available until its own retention deadline.
+      expect(cache.getStale("test-key")).toBe("test-data");
     });
 
     it("should return null from getStale when no data exists", () => {

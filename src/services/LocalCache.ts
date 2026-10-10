@@ -29,7 +29,8 @@ export class MemoryCache implements LocalCache {
     }
 
     if (this.isExpired(entry)) {
-      this.cache.delete(key);
+      // Preserve bounded stale data for a subsequent connection-failure fallback.
+      this.getStale(key);
       this.stats.misses++;
       return null;
     }
@@ -97,7 +98,8 @@ export class MemoryCache implements LocalCache {
     }
 
     if (this.isExpired(entry)) {
-      this.cache.delete(key);
+      // Preserve bounded stale data for a subsequent connection-failure fallback.
+      this.getStale(key);
       return false;
     }
 
