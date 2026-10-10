@@ -406,7 +406,6 @@ export class EmailService {
     if (!/^\d+(?:\.\d+)*$/.test(part)) throw new Error("Invalid IMAP body part");
     const maxBodyBytes = 1024 * 1024;
     const maxMimeBytes = 16384;
-    if ((body.size || 0) > maxBodyBytes) throw new Error("Email text exceeds the 1 MiB read limit; attachments were not downloaded");
     const content = await wrapper.connection.fetchOne(String(uid), {
       bodyParts: [
         { key: mimeKey, maxLength: maxMimeBytes + 1 },
@@ -417,12 +416,39 @@ export class EmailService {
     const mime = content.bodyParts?.get(mimeKey.toLowerCase());
     const text = content.bodyParts?.get(bodyKey.toLowerCase());
     if (!mime || !text) throw new Error("IMAP did not return the requested text part");
-    if (mime.length > maxMimeBytes || text.length > maxBodyBytes) throw new Error("Email text or MIME headers exceed the read limit");
-    return { ...message, source: Buffer.concat([
-      Buffer.from(isRootBody ? "" : `${headers}\r\n`),
-      Buffer.from(mime.toString("utf8").replace(/(?:\r?\n)+$/, "")),
-      Buffer.from("\r\n\r\n"), text,
-    ]) };
+    const truncated = text.length > maxBodyBytes || (body.size || 0) > maxBodyBytes;
+    const largeHeaders = mime.length > maxMimeBytes;
+    // BODYSTRUCTURE supplies decoding metadata even when the header block is too large.
+    const charset = body.parameters?.charset || "us-ascii";
+    const encoding = (body.encoding || "7bit").toLowerCase();
+    if (largeHeaders && (!/^[a-zA-Z0-9._-]+$/.test(charset) ||
+        !["7bit", "8bit", "binary", "base64", "quoted-printable"].includes(encoding))) {
+      throw new Error("Cannot safely decode text with oversized MIME headers and unsupported encoding");
+    }
+    const mimeHeaders = largeHeaders
+      ? `Content-Type: ${body.type}; charset="${charset}"\r\nContent-Transfer-Encoding: ${encoding}`
+      : mime.toString("utf8").replace(/(?:\r?\n)+$/, "");
+    let prefix = text.subarray(0, maxBodyBytes);
+    if (truncated) {
+      // Never feed an incomplete transfer-encoding token to the MIME parser.
+      const transfer = /content-transfer-encoding:\s*([^\s;]+)/i.exec(mimeHeaders)?.[1]?.toLowerCase();
+      if (transfer === "base64") {
+        const encoded = prefix.toString("ascii").replace(/\s/g, "");
+        prefix = Buffer.from(encoded.slice(0, encoded.length - encoded.length % 4), "ascii");
+      } else if (transfer === "quoted-printable") {
+        prefix = Buffer.from(prefix.toString("latin1").replace(/=(?:[0-9a-f]|\r)?$/i, ""), "latin1");
+      }
+    }
+    return { ...message,
+      contentStatus: truncated ? "partial" : "complete",
+      contentWarning: truncated
+        ? "PARTIAL MESSAGE: only the first 1 MiB of encoded body was read. The remainder was not downloaded. Do not treat this excerpt as the complete message."
+        : largeHeaders ? "Oversized MIME headers were reconstructed from IMAP metadata; message text is complete." : undefined,
+      source: Buffer.concat([
+        Buffer.from(isRootBody && !largeHeaders ? "" : `${headers}\r\n`),
+        Buffer.from(mimeHeaders), Buffer.from("\r\n\r\n"), prefix,
+      ]) };
+
   }
 
   private async fetchMessageMetadata(

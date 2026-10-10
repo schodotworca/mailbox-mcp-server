@@ -105,15 +105,33 @@ describe('text-only IMAP reads', () => {
     await expect(service.getEmail(72)).rejects.toThrow('full-message download is disabled');
     expect(connection.fetchOne).not.toHaveBeenCalled();
   });
-  it('rejects oversized text before fetching it', async () => {
-    const {service,connection} = fixture({type:'text/plain',size:1048577});
-    await expect(service.getEmail(72)).rejects.toThrow('1 MiB');
-    expect(connection.fetchOne).not.toHaveBeenCalled();
+  it('returns a clearly marked bounded excerpt for oversized text', async () => {
+    const {service,connection} = fixture({type:'text/plain',size:2000000},Buffer.alloc(1048577, 'a'));
+    const mail = await service.getEmail(72);
+    expect(mail?.contentStatus).toBe('partial');
+    expect(mail?.contentWarning).toContain('Do not treat this excerpt as the complete message');
+    expect(mail?.text?.length).toBeLessThanOrEqual(1048576);
+    expect(connection.fetchOne.mock.calls[0][1].bodyParts[1].maxLength).toBe(1048577);
   });
-  it('bounds the fetch even if advertised text size is wrong', async () => {
-    const {service,cache} = fixture({type:'text/plain',size:1},Buffer.alloc(1048577));
-    await expect(service.getEmail(72)).rejects.toThrow('read limit');
-    expect(cache.set).not.toHaveBeenCalled();
+  it('detects truncation even when the advertised body size is wrong', async () => {
+    const {service} = fixture({type:'text/plain',size:1},Buffer.alloc(1048577, 'a'));
+    expect((await service.getEmail(72))?.contentStatus).toBe('partial');
+  });
+  it('decodes a body using structure metadata when MIME headers exceed the limit', async () => {
+    const {service} = fixture({type:'text/plain',parameters:{charset:'iso-8859-1'},encoding:'quoted-printable'},
+      Buffer.from('caf=E9'), 'X-Large: ' + 'a'.repeat(17000));
+    const mail = await service.getEmail(72);
+    expect(mail?.text?.trim()).toBe('café');
+    expect(mail?.subject).toBe('Test');
+    expect(mail?.contentWarning).toContain('reconstructed');
+  });
+  it.each(['base64','quoted-printable'])('decodes a bounded %s prefix', async encoding => {
+    const body = encoding === 'base64' ? Buffer.from(Buffer.alloc(900000, 'a').toString('base64')) : Buffer.from('a'.repeat(1048575) + '=E9');
+    const {service} = fixture({type:'text/plain',encoding}, body.subarray(0,1048577),
+      `Content-Type: text/plain; charset=utf-8\r\nContent-Transfer-Encoding: ${encoding}\r\n`);
+    const mail = await service.getEmail(72);
+    expect(mail?.contentStatus).toBe('partial');
+    expect(mail?.text).toMatch(/^a+\n?$/);
   });
   it('finds inline text after explicit attachments without downloading their content', async () => {
     const {service,connection} = fixture({type:'multipart/mixed',childNodes:[
