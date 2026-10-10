@@ -38,13 +38,7 @@ export class MemoryCache implements LocalCache {
     entry.accessCount++;
     entry.lastAccessed = Date.now();
 
-    // Adaptive TTL: extend TTL for frequently accessed items
-    // Cap at 1 hour maximum to prevent unbounded growth
-    const MAX_TTL = 3600000; // 1 hour
-    if (entry.accessCount > 3 && entry.priority >= 2) {
-      entry.ttl = Math.min(entry.ttl * 1.2, MAX_TTL);
-    }
-
+    // TTL is a freshness deadline, not an idle timeout. Reads never extend it.
     this.stats.hits++;
     return entry.data as T;
   }

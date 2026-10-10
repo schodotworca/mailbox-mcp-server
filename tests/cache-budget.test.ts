@@ -2,6 +2,19 @@ import { describe, expect, it, vi } from "vitest";
 import { MemoryCache } from "../src/services/LocalCache.js";
 const config = { email: { searchTtl: 100, messageTtl: 100, threadTtl: 100 }, calendar: { eventsTtl: 100, freeBusyTtl: 100 }, maxSize: 100, cleanupInterval: 10000, maxBytes: 1500, staleRetentionMs: 1000 };
 describe("cache memory safeguards", () => {
+  it("never extends freshness when the same search is repeatedly read", () => {
+    vi.useFakeTimers();
+    const cache = new MemoryCache(config);
+    try {
+      cache.set("search:today", ["old mail"], 100);
+      for (let i = 0; i < 8; i++) {
+        vi.advanceTimersByTime(10);
+        expect(cache.get("search:today")).toEqual(["old mail"]);
+      }
+      vi.advanceTimersByTime(21);
+      expect(cache.get("search:today")).toBeNull();
+    } finally { cache.destroy(); vi.useRealTimers(); }
+  });
   it("evicts by bytes even below the entry limit, including replacements", () => {
     const cache = new MemoryCache(config);
     try {
