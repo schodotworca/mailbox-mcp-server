@@ -95,6 +95,8 @@ describe('text-only IMAP reads', () => {
     const {service,connection} = fixture(structure);
     const mail = await service.getEmail(72);
     expect(mail?.subject).toBe('Test');
+    expect(mail?.contentStatus).toBe('unavailable');
+    expect(mail?.contentWarning).toContain('does not mean the message is empty');
     expect(connection.fetchOne).not.toHaveBeenCalled();
   });
   it('rejects missing structure rather than falling back to full download', async () => {
@@ -112,6 +114,15 @@ describe('text-only IMAP reads', () => {
     const {service,cache} = fixture({type:'text/plain',size:1},Buffer.alloc(1048577));
     await expect(service.getEmail(72)).rejects.toThrow('read limit');
     expect(cache.set).not.toHaveBeenCalled();
+  });
+  it('finds inline text after explicit attachments without downloading their content', async () => {
+    const {service,connection} = fixture({type:'multipart/mixed',childNodes:[
+      {type:'application/pdf',part:'1',disposition:'attachment',dispositionParameters:{filename:'plan.pdf'}},
+      {type:'text/plain',part:'2'}
+    ]});
+    const mail = await service.getEmail(72);
+    expect(mail?.text?.trim()).toBe('Hello');
+    expect(connection.fetchOne.mock.calls[0][1].bodyParts.map(p=>p.key)).toEqual(['2.MIME','2']);
   });
   it('selects the related root designated by Content-ID', () => {
     const root = {type:'text/html',part:'2',id:'<root>'};

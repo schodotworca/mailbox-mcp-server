@@ -502,7 +502,7 @@ ${
 **UID:** ${email.uid}
 **Folder:** ${email.folder}
 
-**Content:**
+${email.contentWarning ? `**Content warning:** ${email.contentWarning}\n\n` : ""}**Content:**
 ${email.text || email.html || "No content available"}${attachmentInfo}`,
             },
           ],

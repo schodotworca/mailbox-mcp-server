@@ -18,8 +18,12 @@ export function selectMailBody(node: MessageStructureObject): MessageStructureOb
     const candidates = children.map(selectMailBody).filter((part): part is MessageStructureObject => !!part);
     return candidates.find(part => part.type.toLowerCase() === "text/plain") || candidates[0];
   }
-  // In mixed mail, subsequent text parts may be unnamed attachments.
-  return children[0] ? selectMailBody(children[0]) : undefined;
+  // Skip explicit attachments even when they precede the display body.
+  for (const child of children) {
+    const body = selectMailBody(child);
+    if (body) return body;
+  }
+  return undefined;
 }
 
 export function attachmentMetadata(node: MessageStructureObject, body?: MessageStructureObject): NonNullable<EmailMessage["attachments"]> {

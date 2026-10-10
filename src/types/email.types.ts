@@ -28,6 +28,8 @@ export interface EmailMessage {
     address: string;
   }>;
   date: Date;
+  contentStatus?: "complete" | "partial" | "unavailable";
+  contentWarning?: string;
   text?: string;
   html?: string;
   attachments?: Array<{

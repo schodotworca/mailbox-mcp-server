@@ -16,6 +16,8 @@ interface ImapSearchCriteria {
 }
 
 interface ImapMessage {
+  contentStatus?: "complete" | "partial" | "unavailable";
+  contentWarning?: string;
   envelope: {
     messageId?: string;
     subject?: string;
@@ -393,7 +395,9 @@ export class EmailService {
     const body = selectMailBody(message.bodyStructure);
     const headers = message.headers.toString("utf8").replace(/(?:\r?\n)+$/, "");
     if (!body) {
-      return { ...message, source: Buffer.from(`${headers}\r\n\r\n`) };
+      return { ...message, source: Buffer.from(`${headers}\r\n\r\n`),
+        contentStatus: "unavailable",
+        contentWarning: "No supported inline text body could be read. This does not mean the message is empty. Attachments and attached messages were not downloaded." };
     }
     const isRootBody = body === message.bodyStructure;
     const part = body.part || "1";
@@ -665,6 +669,8 @@ export class EmailService {
       cc: this.parseAddressesFromParsed(parsed.cc),
       bcc: this.parseAddressesFromParsed(parsed.bcc),
       date: parsed.date || new Date(),
+      contentStatus: message.contentStatus || "complete",
+      contentWarning: message.contentWarning,
       text: parsed.text,
       html: parsed.html || undefined,
       attachments: parsed.attachments?.map(att => ({
