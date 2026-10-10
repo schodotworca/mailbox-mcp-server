@@ -395,24 +395,27 @@ export class EmailService {
     if (!body) {
       return { ...message, source: Buffer.from(`${headers}\r\n\r\n`) };
     }
+    const isRootBody = body === message.bodyStructure;
     const part = body.part || "1";
+    const bodyKey = isRootBody ? "TEXT" : part;
+    const mimeKey = isRootBody ? "HEADER" : `${part}.MIME`;
     if (!/^\d+(?:\.\d+)*$/.test(part)) throw new Error("Invalid IMAP body part");
     const maxBodyBytes = 1024 * 1024;
     const maxMimeBytes = 16384;
     if ((body.size || 0) > maxBodyBytes) throw new Error("Email text exceeds the 1 MiB read limit; attachments were not downloaded");
     const content = await wrapper.connection.fetchOne(String(uid), {
       bodyParts: [
-        { key: `${part}.MIME`, maxLength: maxMimeBytes + 1 },
-        { key: part, maxLength: maxBodyBytes + 1 },
+        { key: mimeKey, maxLength: maxMimeBytes + 1 },
+        { key: bodyKey, maxLength: maxBodyBytes + 1 },
       ],
     }, { uid: true });
     if (!content) throw new Error("Message disappeared while reading its text");
-    const mime = content.bodyParts?.get(`${part}.mime`);
-    const text = content.bodyParts?.get(part);
+    const mime = content.bodyParts?.get(mimeKey.toLowerCase());
+    const text = content.bodyParts?.get(bodyKey.toLowerCase());
     if (!mime || !text) throw new Error("IMAP did not return the requested text part");
     if (mime.length > maxMimeBytes || text.length > maxBodyBytes) throw new Error("Email text or MIME headers exceed the read limit");
     return { ...message, source: Buffer.concat([
-      Buffer.from(`${headers}\r\n`),
+      Buffer.from(isRootBody ? "" : `${headers}\r\n`),
       Buffer.from(mime.toString("utf8").replace(/(?:\r?\n)+$/, "")),
       Buffer.from("\r\n\r\n"), text,
     ]) };

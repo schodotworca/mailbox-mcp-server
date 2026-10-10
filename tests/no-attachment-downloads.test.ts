@@ -4,12 +4,14 @@ import { EmailService } from "../src/services/EmailService.js";
 import { selectMailBody } from "../src/utils/mailBody.js";
 
 function fixture(bodyStructure: any, body = Buffer.from('Hello'), mime = 'Content-Type: text/plain; charset=utf-8\r\n') {
-  const part = selectMailBody(bodyStructure)?.part || '1';
+  const selected = selectMailBody(bodyStructure);
+  const root = selected === bodyStructure;
+  const part = selected?.part || '1';
   const connection = {
     fetch: vi.fn(async function* () {
       yield {uid:72, flags:[], bodyStructure, headers:Buffer.from('From: Alice <alice@example.com>\r\nTo: Bob <bob@example.com>\r\nSubject: Test\r\nMessage-ID: <original@example.com>\r\n\r\n')};
     }),
-    fetchOne: vi.fn().mockResolvedValue({uid:72, bodyParts:new Map([[`${part}.mime`,Buffer.from(mime)],[part,body]])}),
+    fetchOne: vi.fn().mockResolvedValue({uid:72, bodyParts:new Map([[root ? 'header' : `${part}.mime`,Buffer.from(mime)],[root ? 'text' : part,body]])}),
     close:vi.fn()
   };
   const wrapper = {connection,isHealthy:true};
@@ -42,6 +44,7 @@ describe('text-only IMAP reads', () => {
       return originalBody(...args);
     });
     expect((await service.getEmail(72))?.text?.trim()).toBe('Hello');
+    expect(connection.fetchOne.mock.calls[0][1].bodyParts.map(p => p.key)).toEqual(['HEADER', 'TEXT']);
   });
   it('fetches only body text despite a 100 MB PDF, images and attached message', async () => {
     const {service,connection} = fixture({type:'multipart/mixed',childNodes:[
