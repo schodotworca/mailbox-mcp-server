@@ -1,3 +1,4 @@
+import { MemoryMonitor } from "./services/MemoryMonitor.js";
 import { Server } from "@modelcontextprotocol/sdk/server/index.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import {
@@ -36,6 +37,7 @@ class MailboxMcpServer {
   private smtpService!: SmtpService;
   private calendarService!: CalendarService;
   private cache!: MemoryCache;
+  private memoryMonitor?: MemoryMonitor;
   private config!: ServerConfig;
   private logger = createLogger("MailboxMcpServer");
 
@@ -68,6 +70,12 @@ class MailboxMcpServer {
     instance.loadConfiguration();
     instance.initializeServices();
     instance.setupToolHandlers();
+    instance.memoryMonitor = new MemoryMonitor(instance.cache, async (high, data) => {
+      const context = { operation: "memory_sample", service: "metrics" };
+      if (high) await instance.logger.warning("High process memory usage", context, data);
+      else await instance.logger.info("Process memory usage", context, data);
+    });
+    instance.memoryMonitor.start();
 
     return instance;
   }
@@ -384,6 +392,7 @@ class MailboxMcpServer {
   }
 
   private async cleanup(): Promise<void> {
+    this.memoryMonitor?.stop();
     const cleanupTimer = this.logger.startTimer("server_cleanup");
 
     try {
