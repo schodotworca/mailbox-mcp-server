@@ -1,3 +1,4 @@
+import { ReadQueueError } from "../utils/ReadLimiter.js";
 import type { Tool } from "@modelcontextprotocol/sdk/types.js";
 import type { EmailService } from "../services/EmailService.js";
 import type { SmtpService } from "../services/SmtpService.js";
@@ -446,6 +447,9 @@ Folder: ${email.folder}
             validatedArgs.folder,
           );
         } catch (error) {
+          if (error instanceof ReadQueueError) {
+            return { isError: true, content: [{ type: "text", text: `${error.code}: ${error.message} This is a local read-queue condition, not evidence that mailbox.org is unavailable.` }] };
+          }
           if (
             error instanceof Error &&
             (error.message.includes("ECONNRESET") ||
