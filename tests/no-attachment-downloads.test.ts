@@ -1,3 +1,4 @@
+import { ImapFlow } from "imapflow";
 import { describe, expect, it, vi } from "vitest";
 import { EmailService } from "../src/services/EmailService.js";
 import { selectMailBody } from "../src/utils/mailBody.js";
@@ -21,6 +22,27 @@ function fixture(bodyStructure: any, body = Buffer.from('Hello'), mime = 'Conten
 }
 
 describe('text-only IMAP reads', () => {
+  it('drains the real ImapFlow iterator before requesting body content', async () => {
+    const {service,connection} = fixture({type:'text/plain',part:'1'});
+    let acknowledged = false;
+    const client = {
+      mailbox: {}, isClosed: false, socket: {destroyed:false},
+      resolveRange: async (range: string) => range,
+      run: vi.fn((_command, _range, _query, options) => new Promise<void>(resolve => {
+        options.onUntaggedFetch({uid:72,flags:[],bodyStructure:{type:'text/plain',part:'1'},headers:Buffer.from('Subject: Test\r\n')}, () => {
+          acknowledged = true;
+          resolve();
+        });
+      })),
+    };
+    connection.fetch.mockImplementation((...args) => ImapFlow.prototype.fetch.apply(client, args));
+    const originalBody = connection.fetchOne.getMockImplementation()!;
+    connection.fetchOne.mockImplementation((...args) => {
+      expect(acknowledged).toBe(true);
+      return originalBody(...args);
+    });
+    expect((await service.getEmail(72))?.text?.trim()).toBe('Hello');
+  });
   it('fetches only body text despite a 100 MB PDF, images and attached message', async () => {
     const {service,connection} = fixture({type:'multipart/mixed',childNodes:[
       {type:'multipart/alternative',part:'1',childNodes:[

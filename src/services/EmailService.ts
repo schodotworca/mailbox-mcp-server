@@ -436,11 +436,13 @@ export class EmailService {
     );
 
     try {
-      // Get the first (and should be only) message
+      // ImapFlow acknowledges each response AFTER yield. Returning early skips
+      // that acknowledgement and blocks subsequent commands on this connection.
+      let message: ImapMessage | null = null;
       for await (const msg of iterator) {
-        return msg as unknown as ImapMessage;
+        message = msg as unknown as ImapMessage;
       }
-      return null;
+      return message;
     } finally {
       // Explicitly close the iterator to prevent connection state issues
       // This is critical for connection reuse - without this, the connection
