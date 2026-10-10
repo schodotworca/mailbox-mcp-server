@@ -1,3 +1,4 @@
+import { ReadLimiter } from "../utils/ReadLimiter.js";
 import type { MessageStructureObject } from "imapflow";
 import { attachmentMetadata, selectMailBody } from "../utils/mailBody.js";
 import { type ParsedMail, simpleParser } from "mailparser";
@@ -64,6 +65,7 @@ import { createLogger } from "./Logger.js";
 import { type OfflineCapabilities, OfflineService } from "./OfflineService.js";
 
 export class EmailService {
+  private readLimiter?: ReadLimiter;
   private pool: ImapConnectionPool;
   private cache: LocalCache;
   private offlineService: OfflineService;
@@ -83,6 +85,7 @@ export class EmailService {
   }
 
   async disconnect(): Promise<void> {
+    this.readLimiter?.close();
     await this.pool.destroy();
   }
 
@@ -141,6 +144,11 @@ export class EmailService {
 }
 
   async getEmail(uid: number, folder = "INBOX"): Promise<EmailMessage | null> {
+    this.readLimiter ??= new ReadLimiter();
+    return this.readLimiter.run(() => this.getEmailWithConnection(uid, folder));
+  }
+
+  private async getEmailWithConnection(uid: number, folder: string): Promise<EmailMessage | null> {
     const cacheKey = `email:${folder}:${uid}`;
     let wrapper: ImapConnectionWrapper | null = null;
 
