@@ -650,7 +650,8 @@ describe("EmailService", () => {
           date: new Date("2024-01-01T10:00:00Z"),
         },
         flags: [],
-        source: Buffer.from("First Email"),
+        bodyStructure: { type: "multipart/mixed", childNodes: [] },
+        headers: Buffer.from("First Email"),
       };
 
       const mockMessage2 = {
@@ -663,7 +664,8 @@ describe("EmailService", () => {
           date: new Date("2024-01-02T10:00:00Z"),
         },
         flags: [],
-        source: Buffer.from("Second Email"),
+        bodyStructure: { type: "multipart/mixed", childNodes: [] },
+        headers: Buffer.from("Second Email"),
       };
 
       // Mock the fetch to return an async iterator with proper cleanup
@@ -739,7 +741,8 @@ describe("EmailService", () => {
           date: new Date(),
         },
         flags: [],
-        source: Buffer.from("Test content"),
+        bodyStructure: { type: "multipart/mixed", childNodes: [] },
+        headers: Buffer.from("Test content"),
       };
 
       mockFetch.mockImplementation(async function* () {
@@ -775,7 +778,8 @@ describe("EmailService", () => {
                 date: new Date(),
               },
               flags: [],
-              source: Buffer.from("content"),
+              bodyStructure: { type: "multipart/mixed", childNodes: [] },
+        headers: Buffer.from("content"),
             };
           } finally {
             iteratorClosed = true;
@@ -814,7 +818,8 @@ describe("EmailService", () => {
               date: new Date(),
             },
             flags: [],
-            source: Buffer.from("content"),
+            bodyStructure: { type: "multipart/mixed", childNodes: [] },
+        headers: Buffer.from("content"),
           };
         },
         return: vi.fn(async () => {
@@ -848,7 +853,8 @@ describe("EmailService", () => {
             date: new Date(),
           },
           flags: [],
-          source: Buffer.from("content"),
+          bodyStructure: { type: "multipart/mixed", childNodes: [] },
+        headers: Buffer.from("content"),
         };
       });
 

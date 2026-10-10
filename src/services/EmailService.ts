@@ -1,3 +1,5 @@
+import type { MessageStructureObject } from "imapflow";
+import { attachmentMetadata, selectMailBody } from "../utils/mailBody.js";
 import { type ParsedMail, simpleParser } from "mailparser";
 
 // IMAP library type definitions
@@ -23,7 +25,9 @@ interface ImapMessage {
   };
   uid: number;
   flags: string[];
-  bodystructure?: unknown;
+  bodyStructure?: MessageStructureObject;
+  headers?: Buffer;
+  source?: Buffer;
   size?: number;
 }
 
@@ -313,9 +317,11 @@ export class EmailService {
       }
 
       const parsed = await simpleParser(
-        (rawMessage as ImapMessage & { source: Buffer }).source,
+        rawMessage.source!, { keepCidLinks: true, skipHtmlToText: false },
       );
-      return this.parseFullEmailMessage(parsed, rawMessage, folder);
+      const email = this.parseFullEmailMessage(parsed, rawMessage, folder);
+      email.attachments = attachmentMetadata(rawMessage.bodyStructure!, selectMailBody(rawMessage.bodyStructure!));
+      return email;
     } catch (error) {
       throw new Error(
         `Failed to fetch email with UID ${uid} from folder ${folder}: ${error instanceof Error ? error.message : String(error)}`,
@@ -369,7 +375,42 @@ export class EmailService {
     }
   }
 
-  private async performFetch(
+  private async performFetch(wrapper: ImapConnectionWrapper, uid: number): Promise<ImapMessage | null> {
+    // Finish the metadata iterator before issuing another IMAP command.
+    const message = await this.fetchMessageMetadata(wrapper, uid);
+    if (!message) return null;
+    if (!message.bodyStructure || !message.headers) {
+      throw new Error("IMAP did not return message headers/body structure; full-message download is disabled");
+    }
+    const body = selectMailBody(message.bodyStructure);
+    const headers = message.headers.toString("utf8").replace(/(?:\r?\n)+$/, "");
+    if (!body) {
+      return { ...message, source: Buffer.from(`${headers}\r\n\r\n`) };
+    }
+    const part = body.part || "1";
+    if (!/^\d+(?:\.\d+)*$/.test(part)) throw new Error("Invalid IMAP body part");
+    const maxBodyBytes = 1024 * 1024;
+    const maxMimeBytes = 16384;
+    if ((body.size || 0) > maxBodyBytes) throw new Error("Email text exceeds the 1 MiB read limit; attachments were not downloaded");
+    const content = await wrapper.connection.fetchOne(String(uid), {
+      bodyParts: [
+        { key: `${part}.MIME`, maxLength: maxMimeBytes + 1 },
+        { key: part, maxLength: maxBodyBytes + 1 },
+      ],
+    }, { uid: true });
+    if (!content) throw new Error("Message disappeared while reading its text");
+    const mime = content.bodyParts?.get(`${part}.mime`);
+    const text = content.bodyParts?.get(part);
+    if (!mime || !text) throw new Error("IMAP did not return the requested text part");
+    if (mime.length > maxMimeBytes || text.length > maxBodyBytes) throw new Error("Email text or MIME headers exceed the read limit");
+    return { ...message, source: Buffer.concat([
+      Buffer.from(`${headers}\r\n`),
+      Buffer.from(mime.toString("utf8").replace(/(?:\r?\n)+$/, "")),
+      Buffer.from("\r\n\r\n"), text,
+    ]) };
+  }
+
+  private async fetchMessageMetadata(
     wrapper: ImapConnectionWrapper,
     uid: number,
   ): Promise<ImapMessage | null> {
@@ -377,7 +418,8 @@ export class EmailService {
     const iterator = wrapper.connection.fetch(
       `${uid}:${uid}`,
       {
-        source: true,
+        bodyStructure: true,
+        headers: ["From", "To", "Cc", "Bcc", "Subject", "Date", "Message-ID"],
         envelope: true,
         uid: true,
         flags: true,

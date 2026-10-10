@@ -98,7 +98,7 @@ export function createEmailTools(
     {
       name: "get_email",
       description:
-        "Get the full content of a specific email by UID. Use this after search_emails when the task requires understanding meaning, intent, acceptance, rejection, decisions, requests, or other information that cannot be determined reliably from email metadata alone.",
+        "Get the main text of a specific email by UID. Attachment contents and embedded images are never downloaded; only attachment metadata is returned. Plain text is preferred; HTML is used when plain text is absent. Text parts over 1 MiB are rejected. Use this after search_emails when the task requires understanding meaning, intent, acceptance, rejection, decisions, requests, or other information that cannot be determined reliably from email metadata alone.",
       inputSchema: {
         type: "object",
         properties: {
