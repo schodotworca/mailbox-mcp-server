@@ -11,7 +11,7 @@ function fixture(bodyStructure: any, body = Buffer.from('Hello'), mime = 'Conten
     fetch: vi.fn(async function* () {
       yield {uid:72, flags:[], bodyStructure, headers:Buffer.from('From: Alice <alice@example.com>\r\nTo: Bob <bob@example.com>\r\nSubject: Test\r\nMessage-ID: <original@example.com>\r\n\r\n')};
     }),
-    fetchOne: vi.fn().mockResolvedValue({uid:72, bodyParts:new Map([[root ? 'header' : `${part}.mime`,Buffer.from(mime)],[root ? 'text' : part,body]])}),
+    fetchOne: vi.fn().mockResolvedValue({uid:72, headers:root ? Buffer.from(mime) : undefined, bodyParts:new Map(root ? [['text',body]] : [[`${part}.mime`,Buffer.from(mime)],[part,body]])}),
     close:vi.fn()
   };
   const wrapper = {connection,isHealthy:true};

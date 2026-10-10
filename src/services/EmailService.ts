@@ -413,7 +413,8 @@ export class EmailService {
       ],
     }, { uid: true });
     if (!content) throw new Error("Message disappeared while reading its text");
-    const mime = content.bodyParts?.get(mimeKey.toLowerCase());
+    // ImapFlow maps BODY[HEADER] to headers, but numbered MIME parts to bodyParts.
+    const mime = isRootBody ? content.headers : content.bodyParts?.get(mimeKey.toLowerCase());
     const text = content.bodyParts?.get(bodyKey.toLowerCase());
     if (!mime || !text) throw new Error("IMAP did not return the requested text part");
     const truncated = text.length > maxBodyBytes || (body.size || 0) > maxBodyBytes;
