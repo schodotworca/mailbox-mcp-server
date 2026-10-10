@@ -72,7 +72,7 @@ class MailboxMcpServer {
     instance.setupToolHandlers();
     instance.memoryMonitor = new MemoryMonitor(instance.cache, async (high, data) => {
       const context = { operation: "memory_sample", service: "metrics" };
-      if (high) await instance.logger.warning("High process memory usage", context, data);
+      if (high) await instance.logger.warning("High memory usage", context, data);
       else await instance.logger.info("Process memory usage", context, data);
     });
     instance.memoryMonitor.start();
