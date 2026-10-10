@@ -56,6 +56,10 @@ export class MemoryCache implements LocalCache {
       return null;
     }
 
+    if (Date.now() - entry.timestamp > entry.ttl + (this.config.staleRetentionMs ?? 300000)) {
+      this.cache.delete(key);
+      return null;
+    }
     return entry.data as T;
   }
 
@@ -73,9 +77,13 @@ export class MemoryCache implements LocalCache {
       accessCount: 0,
       lastAccessed: now,
       priority: priority,
-      size: this.estimateSize(data),
+      size: this.estimateSize(data) + key.length * 2 + 128,
     };
 
+    if (entry.size! > (this.config.maxBytes ?? 16 * 1024 * 1024)) {
+      this.cache.delete(key);
+      return;
+    }
     this.cache.set(key, entry);
     this.enforceMaxSizeWithPriority();
   }
@@ -129,7 +137,7 @@ export class MemoryCache implements LocalCache {
   cleanupWithStaleRetention(): void {
     const now = Date.now();
     const keysToDelete: string[] = [];
-    const staleThreshold = 24 * 60 * 60 * 1000; // Keep stale data for 24 hours
+    const staleThreshold = this.config.staleRetentionMs ?? 300000;
 
     for (const [key, entry] of this.cache.entries()) {
       // Only delete if data is older than TTL + stale threshold
@@ -185,7 +193,9 @@ export class MemoryCache implements LocalCache {
   }
 
   private enforceMaxSizeWithPriority(): void {
-    if (this.cache.size <= this.config.maxSize) {
+    let bytes = Array.from(this.cache.values()).reduce((sum, entry) => sum + (entry.size ?? 0), 0);
+    const maxBytes = this.config.maxBytes ?? 16 * 1024 * 1024;
+    if (this.cache.size <= this.config.maxSize && bytes <= maxBytes) {
       return;
     }
 
@@ -200,9 +210,10 @@ export class MemoryCache implements LocalCache {
       return scoreA - scoreB; // Lower score = evict first
     });
 
-    const toDelete = entries.slice(0, entries.length - this.config.maxSize);
-    for (const [key] of toDelete) {
+    for (const [key, entry] of entries) {
+      if (this.cache.size <= this.config.maxSize && bytes <= maxBytes) break;
       this.cache.delete(key);
+      bytes -= entry.size ?? 0;
       this.stats.evictions++;
     }
   }
@@ -230,11 +241,33 @@ export class MemoryCache implements LocalCache {
   }
 
   private estimateSize<T>(data: T): number {
-    try {
-      return JSON.stringify(data).length * 2; // Rough estimate (2 bytes per char)
-    } catch {
-      return 1000; // Default size if can't serialize
-    }
+    // Estimate without allocating a second serialized copy of the email.
+    const seen = new Set<object>();
+    const budget = this.config.maxBytes ?? 16 * 1024 * 1024;
+    let bytes = 0;
+    const visit = (value: unknown, depth = 0): void => {
+      if (bytes > budget) return;
+      if (typeof value === "string") { bytes += value.length * 2 + 32; return; }
+      if (value === null || typeof value !== "object") { bytes += 16; return; }
+      if (seen.has(value)) return;
+      seen.add(value);
+      bytes += 64;
+      if (ArrayBuffer.isView(value)) { bytes += value.buffer.byteLength; return; }
+      if (value instanceof ArrayBuffer) { bytes += value.byteLength; return; }
+      if (value instanceof Date) return;
+      if (depth > 64 || (Object.getPrototypeOf(value) !== Object.prototype && !Array.isArray(value))) {
+        bytes = budget + 1; // Do not cache unsupported or deeply nested objects.
+        return;
+      }
+      for (const key in value) {
+        if (!Object.prototype.hasOwnProperty.call(value, key)) continue;
+        bytes += key.length * 2 + 16;
+        visit((value as Record<string, unknown>)[key], depth + 1);
+        if (bytes > budget) break;
+      }
+    };
+    visit(data);
+    return bytes;
   }
 
   private startCleanupTimer(): void {

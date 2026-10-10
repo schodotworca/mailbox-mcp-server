@@ -51,6 +51,8 @@ export interface CacheStats {
 }
 
 export interface CacheConfig {
+  maxBytes?: number;
+  staleRetentionMs?: number;
   email: {
     searchTtl: number;
     messageTtl: number;

@@ -155,7 +155,7 @@ describe("MemoryCache", () => {
       // Call cleanupWithStaleRetention (used by automatic cleanup timer)
       (cache as TestableMemoryCache).cleanupWithStaleRetention();
 
-      // Both entries should still exist because stale retention keeps them for 24 hours
+      // Both entries should still exist because stale retention keeps them for 5 minutes
       expect(cache.size()).toBe(2);
       expect(cache.has("expired")).toBe(false); // expired but still in cache
       expect(cache.has("valid")).toBe(true);
@@ -254,7 +254,7 @@ describe("MemoryCache", () => {
         ttl: 300000, // 5 minutes
       });
 
-      expect(cache.getStale("very-old")).toBe("old-data");
+      expect(cache.getStale("very-old")).toBeNull();
 
       // Run stale retention cleanup
       (cache as TestableMemoryCache).cleanupWithStaleRetention();
@@ -264,8 +264,8 @@ describe("MemoryCache", () => {
     });
 
     it("should keep stale data within retention period", () => {
-      // Mock timestamp that's expired but within retention (e.g., 1 hour ago)
-      const recentTimestamp = Date.now() - 60 * 60 * 1000; // 1 hour ago
+      // Mock timestamp that's expired but within retention (e.g., 6 minutes ago)
+      const recentTimestamp = Date.now() - 6 * 60 * 1000; // 6 minutes ago
 
       // Manually add entry that's expired but not too old
       (cache as TestableMemoryCache).cache.set("recent-stale", {
@@ -283,7 +283,7 @@ describe("MemoryCache", () => {
       // Should still be available (but only if get() wasn't called which deletes it)
       // Since we called get() above, the entry is gone, so let's test the cleanup works correctly
       // by adding a fresh entry for this test
-      const freshTimestamp = Date.now() - 60 * 60 * 1000; // 1 hour ago
+      const freshTimestamp = Date.now() - 6 * 60 * 1000; // 6 minutes ago
       (cache as TestableMemoryCache).cache.set("fresh-stale", {
         data: "fresh-stale-data",
         timestamp: freshTimestamp,
