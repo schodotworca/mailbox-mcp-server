@@ -1,3 +1,4 @@
+import { appendQuotedHistory } from "../utils/quotedHistory.js";
 import { ReadQueueError } from "../utils/ReadLimiter.js";
 import type { Tool } from "@modelcontextprotocol/sdk/types.js";
 import type { EmailService } from "../services/EmailService.js";
@@ -139,10 +140,20 @@ export function createEmailTools(
     },
     {
       name: "send_email",
-      description: "Compose and send an email via SMTP",
+      description: "Compose and send an email via SMTP. To include correspondence history, set quoteOriginal to the source message UID and folder, and supply only the new text/html without manually quoting the original. The server appends its text once, including existing quoted history, without attachments or BCC headers. This does not add reply-thread headers. Recipients must always be explicitly supplied.",
       inputSchema: {
         type: "object",
         properties: {
+          quoteOriginal: {
+            type: "object",
+            description: "Optional original email to quote automatically below the new message. Do not also insert the original manually.",
+            properties: {
+              uid: { type: "integer", minimum: 1 },
+              folder: { type: "string", default: "INBOX" },
+            },
+            required: ["uid"],
+            additionalProperties: false,
+          },
           to: {
             type: "array",
             items: {
@@ -579,6 +590,12 @@ ${thread.messages
           text: validatedArgs.text,
           html: validatedArgs.html,
         };
+
+        if (validatedArgs.quoteOriginal) {
+          const original = await emailService.getEmail(validatedArgs.quoteOriginal.uid, validatedArgs.quoteOriginal.folder);
+          if (!original) throw new Error("Original message not found; email was not sent.");
+          Object.assign(composition, appendQuotedHistory(composition, original));
+        }
 
         const result = await smtpService.sendEmail(composition);
 

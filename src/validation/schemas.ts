@@ -241,6 +241,10 @@ export const sendEmailSchema = v.pipe(
         v.maxLength(100, "Too many BCC recipients"),
       ),
     ),
+    quoteOriginal: v.optional(v.object({
+      uid: uidSchema,
+      folder: v.optional(folderNameSchema, "INBOX"),
+    })),
     subject: subjectSchema,
     text: v.optional(textContentSchema),
     html: v.optional(htmlContentSchema),
